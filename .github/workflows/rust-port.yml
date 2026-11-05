@@ -1,0 +1,40 @@
+name: Rust port
+
+on:
+  push:
+    branches:
+      - rust-port/**
+    paths:
+      - "rust/**"
+      - ".github/workflows/rust-port.yml"
+  pull_request:
+    paths:
+      - "rust/**"
+      - ".github/workflows/rust-port.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes pkg-config libwayland-dev libxkbcommon-dev libfontconfig1-dev
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Format
+        run: cargo fmt --manifest-path rust/Cargo.toml --all -- --check
+      - name: Check
+        run: cargo check --manifest-path rust/Cargo.toml --workspace
+      - name: Test
+        run: cargo test --manifest-path rust/Cargo.toml --workspace
+      - name: Clippy
+        run: cargo clippy --manifest-path rust/Cargo.toml --workspace -- -D warnings

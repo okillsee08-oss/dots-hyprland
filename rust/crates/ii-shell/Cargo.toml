@@ -1,0 +1,15 @@
+[package]
+name = "ii-shell"
+version = "0.1.0"
+description = "Native Rust Wayland shell for the end-4 dots-hyprland port"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+smithay-client-toolkit.workspace = true
+tiny-skia.workspace = true
+cosmic-text.workspace = true
+zbus.workspace = true
+serde.workspace = true
+serde_json.workspace = true
