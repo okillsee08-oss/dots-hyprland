@@ -22,6 +22,7 @@ This Rust project replaces the graphical shell/runtime incrementally. It does no
 - [x] Add JSON config model and basic unit tests.
 - [x] Add GitHub Actions checks for formatting, compilation, tests, and Clippy.
 - [ ] Run the first build/test on a real NixOS/Hyprland machine. GitHub source edits cannot prove compositor compatibility or runtime RSS.
+- [x] Add a bounded, read-only Hyprland command-socket adapter for monitor, workspace, and active-window JSON state, with typed models and parser/path-validation tests.
 
 ## Phase 1 — platform/runtime
 
@@ -29,7 +30,8 @@ This Rust project replaces the graphical shell/runtime incrementally. It does no
 - Input seats, pointer/keyboard focus, shortcut and IPC handling.
 - Buffer lifecycle/reuse, damage tracking, frame callbacks, bounded buffer count.
 - Event-loop integration for D-Bus; one shared connection and no worker per feature.
-- Hyprland IPC adapter with reconnect/backoff and typed event models.
+- [x] Hyprland IPC adapter foundation: typed read-only queries for monitors, workspaces, and active window; bounded response size and socket timeouts.
+- [ ] Hyprland event-socket stream, reconnect/backoff, and dispatch integration.
 - Hot-reload configuration without rebuilding or restarting the shell.
 
 ## Phase 2 — desktop shell parity
