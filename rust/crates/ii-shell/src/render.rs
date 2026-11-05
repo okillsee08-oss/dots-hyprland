@@ -29,6 +29,7 @@ mod tests {
         draw_panel(&mut pixels, width as u32, height as u32);
 
         assert_eq!(pixels.len(), width * height * 4);
-        assert_eq!(&pixels[0..4], &[20, 19, 19, 255]);
+        assert_eq!(&pixels[0..4], &[178, 83, 93, 255]);
+        assert_eq!(&pixels[20..24], &[20, 19, 19, 255]);
     }
 }
