@@ -20,6 +20,7 @@ This Rust project replaces the graphical shell/runtime incrementally. It does no
 - [x] Add cosmic-text system-font shaping/rasterization using one shared font system/cache.
 - [x] Add a shared session-bus connection boundary with zbus.
 - [x] Add JSON config model and basic unit tests.
+- [x] Add GitHub Actions checks for formatting, compilation, tests, and Clippy.
 - [ ] Run the first build/test on a real NixOS/Hyprland machine. GitHub source edits cannot prove compositor compatibility or runtime RSS.
 
 ## Phase 1 — platform/runtime
