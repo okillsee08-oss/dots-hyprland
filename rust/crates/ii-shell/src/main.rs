@@ -1,6 +1,11 @@
 use std::{error::Error, num::NonZeroU32};
 
 use ii_shell::{render, text};
+use smithay_client_toolkit::reexports::client::{
+    Connection, QueueHandle,
+    globals::registry_queue_init,
+    protocol::{wl_output, wl_shm, wl_surface},
+};
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState},
     delegate_registry,
@@ -15,11 +20,6 @@ use smithay_client_toolkit::{
         },
     },
     shm::{Shm, ShmHandler, slot::SlotPool},
-};
-use smithay_client_toolkit::reexports::client::{
-    Connection, QueueHandle,
-    globals::registry_queue_init,
-    protocol::{wl_output, wl_shm, wl_surface},
 };
 
 const PANEL_HEIGHT: u32 = 36;
