@@ -121,14 +121,7 @@ mod tests {
             pixel.copy_from_slice(&[20, 19, 19, 255]);
         }
 
-        engine.draw_text(
-            &mut pixels,
-            160,
-            36,
-            "Rust shell",
-            (8, 5),
-            14.0,
-        );
+        engine.draw_text(&mut pixels, 160, 36, "Rust shell", (8, 5), 14.0);
 
         assert_eq!(pixels.len(), 160 * 36 * 4);
     }
