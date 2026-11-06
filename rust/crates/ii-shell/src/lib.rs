@@ -1,6 +1,6 @@
 pub mod bus;
 pub mod config;
+pub mod hyprland_ipc;
 pub mod render;
 pub mod text;
-
-pub mod hyprland_ipc;
+pub mod workspace_model;

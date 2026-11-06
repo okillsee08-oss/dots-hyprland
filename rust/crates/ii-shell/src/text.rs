@@ -67,14 +67,7 @@ struct TextCanvas<'a> {
 }
 
 impl TextCanvas<'_> {
-    fn blend_span(
-        &mut self,
-        x: i32,
-        y: i32,
-        span_width: u32,
-        span_height: u32,
-        color: Color,
-    ) {
+    fn blend_span(&mut self, x: i32, y: i32, span_width: u32, span_height: u32, color: Color) {
         let (red, green, blue, alpha) = color.as_rgba_tuple();
         let source_alpha = u32::from(alpha);
 

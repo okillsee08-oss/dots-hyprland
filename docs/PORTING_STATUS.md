@@ -31,6 +31,7 @@ This Rust project replaces the graphical shell/runtime incrementally. It does no
 - Buffer lifecycle/reuse, damage tracking, frame callbacks, bounded buffer count.
 - Event-loop integration for D-Bus; one shared connection and no worker per feature.
 - [x] Hyprland IPC adapter foundation: typed read-only queries for monitors, workspaces, and active window; bounded response size and socket timeouts.
+- [x] Pure per-monitor workspace model: active-group calculation, occupied/fake workspace indicators, safe slot lookup, and special-workspace naming, with edge-case tests.
 - [ ] Hyprland event-socket stream, reconnect/backoff, and dispatch integration.
 - Hot-reload configuration without rebuilding or restarting the shell.
 
@@ -38,7 +39,7 @@ This Rust project replaces the graphical shell/runtime incrementally. It does no
 
 Port and test one subsystem at a time:
 
-1. Top bar: workspaces, active window, clock, system tray, battery, network, volume, media, notifications and resource indicators.
+1. Top bar: workspace grouping/occupancy data model is implemented; remaining work includes native workspace rendering and interactions, active-window presentation, clock, system tray, battery, network, volume, media, notifications and resource indicators.
 2. Quick settings and sidebars: toggles, device status, controls, search and settings launch.
 3. Overview and window management: foreign-toplevel tracking, previews only on demand, workspace movement.
 4. Dock and app launcher: .desktop indexing, fuzzy search, activation and pinned apps.
