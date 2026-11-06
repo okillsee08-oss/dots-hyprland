@@ -182,13 +182,9 @@ mod tests {
 
     #[test]
     fn derives_occupancy_and_fake_active_workspace_state() {
-        let model = WorkspaceModel::from_monitor(
-            &monitor(5),
-            &[workspace(5), workspace(7)],
-            4,
-            false,
-        )
-        .unwrap();
+        let model =
+            WorkspaceModel::from_monitor(&monitor(5), &[workspace(5), workspace(7)], 4, false)
+                .unwrap();
 
         assert!(model.slots[0].occupied);
         assert!(model.slots[0].is_fake);
@@ -200,8 +196,7 @@ mod tests {
 
     #[test]
     fn active_toplevel_disables_fake_workspace_suppression() {
-        let model =
-            WorkspaceModel::from_monitor(&monitor(5), &[workspace(5)], 4, true).unwrap();
+        let model = WorkspaceModel::from_monitor(&monitor(5), &[workspace(5)], 4, true).unwrap();
 
         assert!(!model.slots[0].is_fake);
         assert!(model.slots[0].visibly_occupied());
