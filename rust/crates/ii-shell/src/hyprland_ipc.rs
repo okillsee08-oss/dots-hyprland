@@ -93,6 +93,15 @@ fn default_scale() -> f64 {
 
 /// Resolve the per-instance command socket without spawning hyprctl.
 pub fn command_socket_path() -> Result<PathBuf, IpcError> {
+    instance_socket_path(".socket.sock")
+}
+
+/// Resolve Hyprland's broadcast event socket for this compositor instance.
+pub fn event_socket_path() -> Result<PathBuf, IpcError> {
+    instance_socket_path(".socket2.sock")
+}
+
+fn instance_socket_path(socket_name: &str) -> Result<PathBuf, IpcError> {
     let signature =
         env::var("HYPRLAND_INSTANCE_SIGNATURE").map_err(|_| IpcError::MissingInstance)?;
     validate_instance_signature(&signature)?;
@@ -101,7 +110,7 @@ pub fn command_socket_path() -> Result<PathBuf, IpcError> {
     Ok(PathBuf::from(runtime)
         .join("hypr")
         .join(signature)
-        .join(".socket.sock"))
+        .join(socket_name))
 }
 
 fn validate_instance_signature(signature: &str) -> Result<(), IpcError> {

@@ -32,7 +32,8 @@ This Rust project replaces the graphical shell/runtime incrementally. It does no
 - Event-loop integration for D-Bus; one shared connection and no worker per feature.
 - [x] Hyprland IPC adapter foundation: typed read-only queries for monitors, workspaces, and active window; bounded response size and socket timeouts.
 - [x] Pure per-monitor workspace model: active-group calculation, occupied/fake workspace indicators, safe slot lookup, and special-workspace naming, with edge-case tests.
-- [ ] Hyprland event-socket stream, reconnect/backoff, and dispatch integration.
+- [x] Hyprland event-socket foundation: bounded incremental line decoder, typed workspace/window/monitor events, unknown-event preservation, and non-blocking socket drain API.
+- [ ] Reconnect/backoff, Wayland event-loop fd registration, and event-to-state reducer integration.
 - Hot-reload configuration without rebuilding or restarting the shell.
 
 ## Phase 2 — desktop shell parity
