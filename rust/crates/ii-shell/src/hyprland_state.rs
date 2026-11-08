@@ -145,21 +145,31 @@ impl HyprlandState {
             }
             HyprlandEvent::DestroyWorkspace { name } => {
                 if let Ok(id) = name.parse::<i64>() {
-                    change.changed |= self.remove_workspace(id);
+                    if self.remove_workspace(id) {
+                        change.changed = true;
+                        request_monitors(&mut change);
+                    }
                 } else {
                     let before = self.workspaces.len();
                     self.workspaces.retain(|workspace| workspace.name != *name);
-                    change.changed |= self.workspaces.len() != before;
+                    if self.workspaces.len() != before {
+                        change.changed = true;
+                        request_monitors(&mut change);
+                    }
                 }
             }
             HyprlandEvent::DestroyWorkspaceV2 { id, .. } => {
-                change.changed |= self.remove_workspace(*id);
+                if self.remove_workspace(*id) {
+                    change.changed = true;
+                    request_monitors(&mut change);
+                }
             }
             HyprlandEvent::MoveWorkspace { name, monitor } => {
                 if let Some(workspace) = self.workspaces.iter_mut().find(|ws| ws.name == *name) {
                     if workspace.monitor != *monitor {
                         workspace.monitor.clone_from(monitor);
                         change.changed = true;
+                        request_monitors(&mut change);
                     }
                 } else {
                     request_workspaces(&mut change);
@@ -170,6 +180,7 @@ impl HyprlandState {
                     if workspace.monitor != *monitor {
                         workspace.monitor.clone_from(monitor);
                         change.changed = true;
+                        request_monitors(&mut change);
                     }
                 } else {
                     request_workspaces(&mut change);
@@ -261,11 +272,13 @@ impl HyprlandState {
 
     /// None means the monitor is absent; Some(false) means it was already current.
     fn focus_monitor(&mut self, name: &str, active: Option<WorkspaceRef>) -> Option<bool> {
-        let mut found = false;
+        if !self.monitors.iter().any(|monitor| monitor.name == name) {
+            return None;
+        }
+
         let mut changed = false;
         for monitor in &mut self.monitors {
             let focused = monitor.name == name;
-            found |= focused;
             if monitor.focused != focused {
                 monitor.focused = focused;
                 changed = true;
@@ -279,7 +292,7 @@ impl HyprlandState {
                 }
             }
         }
-        found.then_some(changed)
+        Some(changed)
     }
 
     fn set_active_workspace(&mut self, monitor_name: &str, id: i64, name: &str) -> bool {
@@ -560,6 +573,38 @@ mod tests {
                 .iter()
                 .any(|workspace| workspace.monitor == "DP-1")
         );
+    }
+
+    #[test]
+    fn unknown_monitor_focus_does_not_clear_existing_focus() {
+        let mut state = state();
+        let change = state.apply(&HyprlandEvent::FocusedMonitorV2 {
+            monitor: "DP-2".into(),
+            workspace_id: 9,
+        });
+        assert!(change.refresh_monitors);
+        assert!(state.monitors[0].focused);
+        assert!(!state.monitors[1].focused);
+    }
+
+    #[test]
+    fn workspace_topology_events_request_monitor_reconciliation() {
+        let mut state = state();
+        state.apply(&HyprlandEvent::CreateWorkspaceV2 {
+            id: 3,
+            name: "three".into(),
+        });
+        let moved = state.apply(&HyprlandEvent::MoveWorkspaceV2 {
+            id: 3,
+            name: "three".into(),
+            monitor: "DP-1".into(),
+        });
+        assert!(moved.refresh_monitors);
+        let destroyed = state.apply(&HyprlandEvent::DestroyWorkspaceV2 {
+            id: 3,
+            name: "three".into(),
+        });
+        assert!(destroyed.refresh_monitors);
     }
 
     #[test]
