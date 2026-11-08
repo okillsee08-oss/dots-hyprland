@@ -40,6 +40,7 @@ The Hyprland compositor remains responsible for windows and composition. This pr
 - `crates/ii-shell/src/config.rs`: versionable shell settings model.
 - `crates/ii-shell/src/hyprland_ipc.rs`: bounded typed Hyprland command-socket queries.
 - `crates/ii-shell/src/workspace_model.rs`: per-monitor workspace grouping and occupancy projection.
+- `crates/ii-shell/src/hyprland_state.rs`: pure event-to-state reducer with targeted refresh hints.
 
 ## Build on Linux
 

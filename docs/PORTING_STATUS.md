@@ -2,7 +2,8 @@
 
 **Branch:** `rust-port/phase-0`  
 **Upstream:** `end-4/dots-hyprland`  
-**Reference revision at port start:** `2f2a376fdb2ad738bf55f693dd0b474b64bb0ab8`
+**Reference revision at port start:** `2f2a376fdb2ad738bf55f693dd0b474b64bb0ab8`  
+**Latest upstream inspected (2026-11-08):** `cb1c428bf841dabccff1b126904047c28e89ba8c`
 
 ## What is being ported
 
@@ -33,7 +34,9 @@ This Rust project replaces the graphical shell/runtime incrementally. It does no
 - [x] Hyprland IPC adapter foundation: typed read-only queries for monitors, workspaces, and active window; bounded response size and socket timeouts.
 - [x] Pure per-monitor workspace model: active-group calculation, occupied/fake workspace indicators, safe slot lookup, and special-workspace naming, with edge-case tests.
 - [x] Hyprland event-socket foundation: bounded incremental line decoder, typed workspace/window/monitor events, unknown-event preservation, and non-blocking socket drain API.
-- [ ] Reconnect/backoff, Wayland event-loop fd registration, and event-to-state reducer integration.
+- [x] Event-to-state reducer tests for multi-monitor focus, workspace lifecycle, active-window updates, special workspaces, hotplug refreshes, and ignored events.
+- [x] Pure Hyprland event-to-state reducer for focused workspaces/monitors, workspace create/destroy/move/rename, special workspace state, and active-window metadata; emits targeted refresh hints when event payloads are incomplete.
+- [ ] Reconnect/backoff and Wayland event-loop fd registration for the event socket.
 - Hot-reload configuration without rebuilding or restarting the shell.
 
 ## Phase 2 — desktop shell parity

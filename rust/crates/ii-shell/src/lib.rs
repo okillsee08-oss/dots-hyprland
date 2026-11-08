@@ -6,3 +6,5 @@ pub mod text;
 pub mod workspace_model;
 
 pub mod hyprland_events;
+
+pub mod hyprland_state;
