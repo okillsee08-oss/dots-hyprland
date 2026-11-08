@@ -75,7 +75,10 @@ impl HyprlandState {
                     .workspaces
                     .iter()
                     .find(|workspace| workspace.id == *workspace_id)
-                    .map_or_else(|| workspace_id.to_string(), |workspace| workspace.name.clone());
+                    .map_or_else(
+                        || workspace_id.to_string(),
+                        |workspace| workspace.name.clone(),
+                    );
                 let active = Some(WorkspaceRef {
                     id: *workspace_id,
                     name,
@@ -124,7 +127,8 @@ impl HyprlandState {
             | HyprlandEvent::MonitorRemovedV2 { name, .. } => {
                 let before = self.monitors.len();
                 self.monitors.retain(|monitor| monitor.name != *name);
-                self.workspaces.retain(|workspace| workspace.monitor != *name);
+                self.workspaces
+                    .retain(|workspace| workspace.monitor != *name);
                 change.changed = self.monitors.len() != before;
                 request_monitors(&mut change);
                 request_workspaces(&mut change);
@@ -181,9 +185,11 @@ impl HyprlandState {
                     request_workspaces(&mut change);
                 }
                 for monitor in &mut self.monitors {
-                    if monitor.active_workspace.as_ref().is_some_and(|active| {
-                        active.id == *id && active.name != *name
-                    }) {
+                    if monitor
+                        .active_workspace
+                        .as_ref()
+                        .is_some_and(|active| active.id == *id && active.name != *name)
+                    {
                         if let Some(active) = monitor.active_workspace.as_mut() {
                             active.name.clone_from(name);
                         }
@@ -277,7 +283,11 @@ impl HyprlandState {
     }
 
     fn set_active_workspace(&mut self, monitor_name: &str, id: i64, name: &str) -> bool {
-        let Some(monitor) = self.monitors.iter_mut().find(|item| item.name == monitor_name) else {
+        let Some(monitor) = self
+            .monitors
+            .iter_mut()
+            .find(|item| item.name == monitor_name)
+        else {
             return false;
         };
         let next = WorkspaceRef {
@@ -292,7 +302,11 @@ impl HyprlandState {
     }
 
     fn upsert_workspace(&mut self, id: i64, name: &str, monitor: &str) -> bool {
-        if let Some(existing) = self.workspaces.iter_mut().find(|workspace| workspace.id == id) {
+        if let Some(existing) = self
+            .workspaces
+            .iter_mut()
+            .find(|workspace| workspace.id == id)
+        {
             let mut changed = false;
             if existing.name != name {
                 existing.name = name.to_owned();
@@ -372,14 +386,23 @@ mod tests {
 
     fn state() -> HyprlandState {
         HyprlandState {
-            monitors: vec![
-                monitor(0, "eDP-1", true, 2),
-                monitor(1, "DP-1", false, 7),
-            ],
+            monitors: vec![monitor(0, "eDP-1", true, 2), monitor(1, "DP-1", false, 7)],
             workspaces: vec![
-                Workspace { id: 1, name: "1".into(), monitor: "eDP-1".into() },
-                Workspace { id: 2, name: "2".into(), monitor: "eDP-1".into() },
-                Workspace { id: 7, name: "7".into(), monitor: "DP-1".into() },
+                Workspace {
+                    id: 1,
+                    name: "1".into(),
+                    monitor: "eDP-1".into(),
+                },
+                Workspace {
+                    id: 2,
+                    name: "2".into(),
+                    monitor: "eDP-1".into(),
+                },
+                Workspace {
+                    id: 7,
+                    name: "7".into(),
+                    monitor: "DP-1".into(),
+                },
             ],
             active_window: ActiveWindow {
                 address: "0xabc".into(),
@@ -392,11 +415,19 @@ mod tests {
     #[test]
     fn workspace_event_updates_only_the_focused_monitor() {
         let mut state = state();
-        let change = state.apply(&HyprlandEvent::WorkspaceV2 { id: 3, name: "3".into() });
+        let change = state.apply(&HyprlandEvent::WorkspaceV2 {
+            id: 3,
+            name: "3".into(),
+        });
         assert!(change.changed);
         assert_eq!(state.monitors[0].active_workspace.as_ref().unwrap().id, 3);
         assert_eq!(state.monitors[1].active_workspace.as_ref().unwrap().id, 7);
-        assert!(state.workspaces.iter().any(|workspace| workspace.id == 3 && workspace.monitor == "eDP-1"));
+        assert!(
+            state
+                .workspaces
+                .iter()
+                .any(|workspace| workspace.id == 3 && workspace.monitor == "eDP-1")
+        );
     }
 
     #[test]
@@ -415,17 +446,42 @@ mod tests {
     #[test]
     fn create_move_rename_and_destroy_workspace_events_are_applied() {
         let mut state = state();
-        state.apply(&HyprlandEvent::CreateWorkspaceV2 { id: 3, name: "three".into() });
+        state.apply(&HyprlandEvent::CreateWorkspaceV2 {
+            id: 3,
+            name: "three".into(),
+        });
         assert!(state.workspaces.iter().any(|workspace| workspace.id == 3));
         state.apply(&HyprlandEvent::MoveWorkspaceV2 {
             id: 3,
             name: "three".into(),
             monitor: "DP-1".into(),
         });
-        assert_eq!(state.workspaces.iter().find(|workspace| workspace.id == 3).unwrap().monitor, "DP-1");
-        state.apply(&HyprlandEvent::RenameWorkspace { id: 3, name: "code".into() });
-        assert_eq!(state.workspaces.iter().find(|workspace| workspace.id == 3).unwrap().name, "code");
-        let change = state.apply(&HyprlandEvent::DestroyWorkspaceV2 { id: 3, name: "code".into() });
+        assert_eq!(
+            state
+                .workspaces
+                .iter()
+                .find(|workspace| workspace.id == 3)
+                .unwrap()
+                .monitor,
+            "DP-1"
+        );
+        state.apply(&HyprlandEvent::RenameWorkspace {
+            id: 3,
+            name: "code".into(),
+        });
+        assert_eq!(
+            state
+                .workspaces
+                .iter()
+                .find(|workspace| workspace.id == 3)
+                .unwrap()
+                .name,
+            "code"
+        );
+        let change = state.apply(&HyprlandEvent::DestroyWorkspaceV2 {
+            id: 3,
+            name: "code".into(),
+        });
         assert!(change.changed);
         assert!(!state.workspaces.iter().any(|workspace| workspace.id == 3));
     }
@@ -447,7 +503,9 @@ mod tests {
         assert!(!stale.changed);
         assert_eq!(state.active_window.title, "New title");
 
-        let focus = state.apply(&HyprlandEvent::ActiveWindowV2 { address: "0xdef".into() });
+        let focus = state.apply(&HyprlandEvent::ActiveWindowV2 {
+            address: "0xdef".into(),
+        });
         assert!(focus.refresh_active_window);
         assert!(state.active_window.title.is_empty());
     }
@@ -455,7 +513,9 @@ mod tests {
     #[test]
     fn closing_the_active_window_clears_its_cached_metadata() {
         let mut state = state();
-        let change = state.apply(&HyprlandEvent::CloseWindow { address: "0xabc".into() });
+        let change = state.apply(&HyprlandEvent::CloseWindow {
+            address: "0xabc".into(),
+        });
         assert!(change.changed);
         assert!(state.active_window.address.is_empty());
         assert!(state.active_window.app_class.is_empty());
@@ -483,14 +543,23 @@ mod tests {
     #[test]
     fn monitor_hotplug_requests_authoritative_refresh_and_removal_is_immediate() {
         let mut state = state();
-        let added = state.apply(&HyprlandEvent::MonitorAdded { name: "HDMI-A-1".into() });
+        let added = state.apply(&HyprlandEvent::MonitorAdded {
+            name: "HDMI-A-1".into(),
+        });
         assert!(added.refresh_monitors);
         assert!(added.refresh_workspaces);
 
-        let removed = state.apply(&HyprlandEvent::MonitorRemoved { name: "DP-1".into() });
+        let removed = state.apply(&HyprlandEvent::MonitorRemoved {
+            name: "DP-1".into(),
+        });
         assert!(removed.refresh_monitors);
         assert!(!state.monitors.iter().any(|monitor| monitor.name == "DP-1"));
-        assert!(!state.workspaces.iter().any(|workspace| workspace.monitor == "DP-1"));
+        assert!(
+            !state
+                .workspaces
+                .iter()
+                .any(|workspace| workspace.monitor == "DP-1")
+        );
     }
 
     #[test]
