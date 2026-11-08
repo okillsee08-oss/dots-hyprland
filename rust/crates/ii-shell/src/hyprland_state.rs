@@ -6,9 +6,7 @@
 
 use crate::{
     hyprland_events::HyprlandEvent,
-    hyprland_ipc::{
-        ActiveWindow, Monitor, Snapshot, SpecialWorkspace, Workspace, WorkspaceRef,
-    },
+    hyprland_ipc::{ActiveWindow, Monitor, Snapshot, SpecialWorkspace, Workspace, WorkspaceRef},
 };
 
 const SPECIAL_WORKSPACE_ID: i64 = -99;
@@ -64,10 +62,9 @@ impl HyprlandState {
                 if active.is_none() {
                     request_workspaces(&mut change);
                 }
-                if !self.focus_monitor(monitor, active) {
-                    request_monitors(&mut change);
-                } else {
-                    change.changed = true;
+                match self.focus_monitor(monitor, active) {
+                    Some(changed) => change.changed |= changed,
+                    None => request_monitors(&mut change),
                 }
             }
             HyprlandEvent::FocusedMonitorV2 {
@@ -83,14 +80,14 @@ impl HyprlandState {
                     id: *workspace_id,
                     name,
                 });
-                if !self.focus_monitor(monitor, active) {
-                    request_monitors(&mut change);
-                } else {
-                    change.changed = true;
+                match self.focus_monitor(monitor, active) {
+                    Some(changed) => change.changed |= changed,
+                    None => request_monitors(&mut change),
                 }
             }
             HyprlandEvent::ActiveWindow { app_class, title } => {
-                if self.active_window.app_class != *app_class || self.active_window.title != *title {
+                if self.active_window.app_class != *app_class || self.active_window.title != *title
+                {
                     self.active_window.app_class.clone_from(app_class);
                     self.active_window.title.clone_from(title);
                     change.changed = true;
@@ -184,9 +181,9 @@ impl HyprlandState {
                     request_workspaces(&mut change);
                 }
                 for monitor in &mut self.monitors {
-                    if monitor.active_workspace.as_ref().is_some_and(|active| active.id == *id)
-                        && monitor.active_workspace.as_ref().is_some_and(|active| active.name != *name)
-                    {
+                    if monitor.active_workspace.as_ref().is_some_and(|active| {
+                        active.id == *id && active.name != *name
+                    }) {
                         if let Some(active) = monitor.active_workspace.as_mut() {
                             active.name.clone_from(name);
                         }
@@ -227,13 +224,11 @@ impl HyprlandState {
                 change.changed = true;
             }
             // These events are either not represented in the current cached
-            // model or are informational. Window inventory and layer state are
-            // deliberately separate follow-up subsystems.
+            // model or belong to the separate window-inventory/layer subsystem.
             HyprlandEvent::Fullscreen { .. }
             | HyprlandEvent::OpenWindow { .. }
             | HyprlandEvent::MoveWindow { .. }
             | HyprlandEvent::MoveWindowV2 { .. }
-            | HyprlandEvent::ActiveSpecial { .. }
             | HyprlandEvent::Submap { .. }
             | HyprlandEvent::Unknown { .. } => {}
         }
@@ -241,12 +236,7 @@ impl HyprlandState {
         change
     }
 
-    fn activate_on_focused_monitor(
-        &mut self,
-        id: i64,
-        name: &str,
-        change: &mut StateChange,
-    ) {
+    fn activate_on_focused_monitor(&mut self, id: i64, name: &str, change: &mut StateChange) {
         let Some(monitor_name) = self
             .monitors
             .iter()
@@ -263,7 +253,8 @@ impl HyprlandState {
         change.changed |= self.upsert_workspace(id, name, &monitor_name);
     }
 
-    fn focus_monitor(&mut self, name: &str, active: Option<WorkspaceRef>) -> bool {
+    /// None means the monitor is absent; Some(false) means it was already current.
+    fn focus_monitor(&mut self, name: &str, active: Option<WorkspaceRef>) -> Option<bool> {
         let mut found = false;
         let mut changed = false;
         for monitor in &mut self.monitors {
@@ -282,7 +273,7 @@ impl HyprlandState {
                 }
             }
         }
-        found && changed || found
+        found.then_some(changed)
     }
 
     fn set_active_workspace(&mut self, monitor_name: &str, id: i64, name: &str) -> bool {
@@ -361,7 +352,7 @@ fn request_workspaces(change: &mut StateChange) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hyprland_ipc::{WorkspaceRef, SpecialWorkspace};
+    use crate::hyprland_ipc::WorkspaceRef;
 
     fn monitor(id: i64, name: &str, focused: bool, active: i64) -> Monitor {
         Monitor {
