@@ -6,14 +6,11 @@
 //! Refresh flags are coalesced, and failed queries remain pending for retry.
 //! This module deliberately does not own or poll the Wayland event loop yet.
 
-use std::{
-    io,
-    os::fd::RawFd,
-};
+use std::{io, os::fd::RawFd};
 
 use crate::{
     hyprland_events::{EventParseError, HyprlandEventStream},
-    hyprland_ipc::{IpcError, HyprlandIpc, Snapshot},
+    hyprland_ipc::{HyprlandIpc, IpcError, Snapshot},
     hyprland_state::{HyprlandState, StateChange},
 };
 
@@ -72,11 +69,7 @@ impl HyprlandRuntime {
 
     /// Inject connected transports and a known initial state. This also keeps
     /// the coordinator testable without requiring a running Hyprland session.
-    pub fn from_parts(
-        ipc: HyprlandIpc,
-        events: HyprlandEventStream,
-        state: HyprlandState,
-    ) -> Self {
+    pub fn from_parts(ipc: HyprlandIpc, events: HyprlandEventStream, state: HyprlandState) -> Self {
         Self {
             ipc,
             events,
@@ -209,7 +202,10 @@ mod tests {
         let (writer, reader) = UnixStream::pair().unwrap();
         let events = HyprlandEventStream::from_stream(reader).unwrap();
         let ipc = HyprlandIpc::from_socket_path(path);
-        (HyprlandRuntime::from_parts(ipc, events, empty_state()), writer)
+        (
+            HyprlandRuntime::from_parts(ipc, events, empty_state()),
+            writer,
+        )
     }
 
     #[test]
@@ -227,12 +223,8 @@ mod tests {
                     "j/monitors" => {
                         r#"[{"id":0,"name":"eDP-1","width":1920,"height":1080,"focused":true,"activeWorkspace":{"id":1,"name":"1"}}]"#
                     }
-                    "j/workspaces" => {
-                        r#"[{"id":1,"name":"1","monitor":"eDP-1"}]"#
-                    }
-                    "j/activewindow" => {
-                        r#"{"address":"0x123","class":"firefox","title":"Docs"}"#
-                    }
+                    "j/workspaces" => r#"[{"id":1,"name":"1","monitor":"eDP-1"}]"#,
+                    "j/activewindow" => r#"{"address":"0x123","class":"firefox","title":"Docs"}"#
                     other => panic!("unexpected IPC request: {other}"),
                 };
                 stream.write_all(response.as_bytes()).unwrap();
@@ -242,9 +234,7 @@ mod tests {
 
         let (mut runtime, mut event_writer) = runtime_with_event_pair(path.clone());
         event_writer
-            .write_all(
-                b"monitoradded>>DP-1\nmonitoradded>>DP-2\nactivewindowv2>>0x123\n",
-            )
+            .write_all(b"monitoradded>>DP-1\nmonitoradded>>DP-2\nactivewindowv2>>0x123\n")
             .unwrap();
 
         let drained = runtime.drain_ready_events().unwrap();
