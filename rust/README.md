@@ -41,6 +41,7 @@ The Hyprland compositor remains responsible for windows and composition. This pr
 - `crates/ii-shell/src/hyprland_ipc.rs`: bounded typed Hyprland command-socket queries.
 - `crates/ii-shell/src/workspace_model.rs`: per-monitor workspace grouping and occupancy projection.
 - `crates/ii-shell/src/hyprland_state.rs`: pure event-to-state reducer with targeted refresh hints.
+- `crates/ii-shell/src/hyprland_runtime.rs`: event-batch coordinator and coalesced targeted command-socket refreshes.
 
 ## Build on Linux
 
@@ -53,7 +54,7 @@ cargo test --manifest-path rust/Cargo.toml --workspace
 cargo run --manifest-path rust/Cargo.toml -p ii-shell
 ```
 
-The first panel requires a Wayland compositor advertising `zwlr_layer_shell_v1` (Hyprland does). It is deliberately a small proof-of-life, not yet a complete desktop shell.
+The first panel requires a Wayland compositor advertising `zwlr_layer_shell_v1` (Hyprland does). The Hyprland runtime coordinator is currently a separately tested component; the event fd is not yet registered with the main Wayland event loop. The project remains an early proof-of-life, not a complete desktop shell.
 
 ## Memory rules
 

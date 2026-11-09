@@ -36,6 +36,7 @@ This Rust project replaces the graphical shell/runtime incrementally. It does no
 - [x] Hyprland event-socket foundation: bounded incremental line decoder, typed workspace/window/monitor events, unknown-event preservation, and non-blocking socket drain API.
 - [x] Event-to-state reducer tests for multi-monitor focus, workspace lifecycle, active-window updates, special workspaces, hotplug refreshes, and ignored events.
 - [x] Pure Hyprland event-to-state reducer for focused workspaces/monitors, workspace create/destroy/move/rename, special workspace state, and active-window metadata; emits targeted refresh hints when event payloads are incomplete.
+- [x] Event coordinator joins the non-blocking event stream, reducer, and command IPC; coalesces monitor/workspace/active-window refreshes, reports parse failures without losing neighboring events, and retains failed refreshes for retry.
 - [ ] Reconnect/backoff and Wayland event-loop fd registration for the event socket.
 - Hot-reload configuration without rebuilding or restarting the shell.
 
