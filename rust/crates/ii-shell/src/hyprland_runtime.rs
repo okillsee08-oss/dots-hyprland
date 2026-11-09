@@ -224,7 +224,7 @@ mod tests {
                         r#"[{"id":0,"name":"eDP-1","width":1920,"height":1080,"focused":true,"activeWorkspace":{"id":1,"name":"1"}}]"#
                     }
                     "j/workspaces" => r#"[{"id":1,"name":"1","monitor":"eDP-1"}]"#,
-                    "j/activewindow" => r#"{"address":"0x123","class":"firefox","title":"Docs"}"#
+                    "j/activewindow" => r#"{"address":"0x123","class":"firefox","title":"Docs"}"#,
                     other => panic!("unexpected IPC request: {other}"),
                 };
                 stream.write_all(response.as_bytes()).unwrap();
