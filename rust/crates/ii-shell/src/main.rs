@@ -1,6 +1,11 @@
 use std::{collections::HashMap, error::Error, num::NonZeroU32};
 
 use ii_shell::{output_model::PanelGeometry, render, text};
+use smithay_client_toolkit::reexports::client::{
+    Connection, QueueHandle,
+    globals::registry_queue_init,
+    protocol::{wl_output, wl_shm, wl_surface},
+};
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState},
     delegate_registry,
@@ -14,12 +19,10 @@ use smithay_client_toolkit::{
             LayerSurfaceConfigure,
         },
     },
-    shm::{Shm, ShmHandler, slot::{Buffer, SlotPool}},
-};
-use smithay_client_toolkit::reexports::client::{
-    Connection, QueueHandle,
-    globals::registry_queue_init,
-    protocol::{wl_output, wl_shm, wl_surface},
+    shm::{
+        Shm, ShmHandler,
+        slot::{Buffer, SlotPool},
+    },
 };
 
 const PANEL_HEIGHT: u32 = 36;
@@ -135,7 +138,7 @@ impl RustShell {
     ) -> Result<(), Box<dyn Error>> {
         let scale_factor = normalized_scale(info.scale_factor);
         let fallback_width = output_logical_width(info, scale_factor);
-        let (layer, geometry) = {
+        let geometry = {
             let Some(panel) = self.panels.get_mut(&output_id) else {
                 return Ok(());
             };
@@ -152,7 +155,7 @@ impl RustShell {
                     )
                 })
                 .transpose()?;
-            (panel.layer.clone(), geometry)
+            geometry
         };
 
         if let Some(geometry) = geometry {
@@ -160,8 +163,6 @@ impl RustShell {
                 self.draw_output(output_id)?;
             }
         }
-        // Keep the layer alive while output metadata is being updated.
-        drop(layer);
         Ok(())
     }
 
@@ -182,14 +183,20 @@ impl RustShell {
                 return Ok(());
             };
             panel.scale_factor = scale_factor;
-            panel.layer.wl_surface().set_buffer_scale(scale_factor as i32);
-            panel.geometry.map(|current| {
-                PanelGeometry::from_logical_size(
-                    current.logical_width,
-                    current.logical_height,
-                    scale_factor,
-                )
-            }).transpose()?
+            panel
+                .layer
+                .wl_surface()
+                .set_buffer_scale(scale_factor as i32);
+            panel
+                .geometry
+                .map(|current| {
+                    PanelGeometry::from_logical_size(
+                        current.logical_width,
+                        current.logical_height,
+                        scale_factor,
+                    )
+                })
+                .transpose()?
         };
 
         if let Some(geometry) = geometry {
@@ -345,9 +352,10 @@ impl CompositorHandler for RustShell {
         surface: &wl_surface::WlSurface,
         new_factor: i32,
     ) {
-        let output_id = self.panels.iter().find_map(|(id, panel)| {
-            (panel.layer.wl_surface() == surface).then_some(*id)
-        });
+        let output_id = self
+            .panels
+            .iter()
+            .find_map(|(id, panel)| (panel.layer.wl_surface() == surface).then_some(*id));
         if let Some(output_id) = output_id {
             if let Err(error) = self.update_panel_scale(output_id, new_factor) {
                 eprintln!("ii-shell: output scale update failed: {error}");
