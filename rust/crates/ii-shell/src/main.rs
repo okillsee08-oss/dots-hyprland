@@ -1,4 +1,4 @@
-use std::{collections::HashMap, error::Error, io, os::fd::AsRawFd};
+use std::{collections::HashMap, error::Error, io, os::fd::{AsFd, AsRawFd}};
 
 use ii_shell::{output_model::PanelGeometry, render, text};
 use smithay_client_toolkit::reexports::client::{
@@ -80,7 +80,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         let mut descriptors = [
             libc::pollfd {
-                fd: event_queue.as_raw_fd(),
+                fd: event_queue.as_fd().as_raw_fd(),
                 events: libc::POLLIN,
                 revents: 0,
             },
