@@ -228,7 +228,10 @@ mod tests {
         let offset = ((7 * width + 86) * 4) as usize;
         assert_eq!(&pixels[offset..offset + 4], &[178, 83, 93, 255]);
         assert_eq!(special_workspace_width("chat", 1), 46);
-        assert_eq!(special_workspace_width("a very long special workspace", 1), 142);
+        assert_eq!(
+            special_workspace_width("a very long special workspace", 1),
+            142
+        );
     }
 
     #[test]

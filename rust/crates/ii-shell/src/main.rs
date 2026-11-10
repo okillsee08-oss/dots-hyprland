@@ -643,7 +643,9 @@ impl RustShell {
             let special_width = workspace_models
                 .get(&output_id)
                 .and_then(|model| model.special_workspace_name.as_deref())
-                .map_or(0, |name| render::special_workspace_width(name, scale as u32) as i32);
+                .map_or(0, |name| {
+                    render::special_workspace_width(name, scale as u32) as i32
+                });
             if let Some(name) = workspace_models
                 .get(&output_id)
                 .and_then(|model| model.special_workspace_name.as_deref())
