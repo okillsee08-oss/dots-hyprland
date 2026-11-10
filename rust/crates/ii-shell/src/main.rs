@@ -144,7 +144,10 @@ impl RustShell {
             };
             panel.fallback_width = fallback_width.or(panel.fallback_width);
             panel.scale_factor = scale_factor;
-            panel.layer.wl_surface().set_buffer_scale(scale_factor as i32);
+            panel
+                .layer
+                .wl_surface()
+                .set_buffer_scale(scale_factor as i32);
             let geometry = panel
                 .geometry
                 .map(|current| {
