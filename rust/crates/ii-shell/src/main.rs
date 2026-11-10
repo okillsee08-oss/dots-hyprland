@@ -1,4 +1,9 @@
-use std::{collections::HashMap, error::Error, io, os::fd::{AsFd, AsRawFd}};
+use std::{
+    collections::HashMap,
+    error::Error,
+    io,
+    os::fd::{AsFd, AsRawFd},
+};
 
 use ii_shell::{output_model::PanelGeometry, render, text};
 use smithay_client_toolkit::reexports::client::{
