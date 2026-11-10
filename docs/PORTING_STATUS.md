@@ -36,7 +36,7 @@ This Rust project replaces the graphical shell/runtime incrementally. It does no
 - [ ] Validate output hotplug, scale changes, suspend/resume and multiple outputs on a real NixOS/Hyprland session.
 - [ ] Input seats, pointer/keyboard focus, shortcut and IPC handling.
 - [x] Register the Hyprland broadcast socket and Wayland display fd in one blocking poll(2) loop using EventQueue::prepare_read(); drain event batches, coalesce command-socket refreshes, and invalidate output panels only when cached state changes.
-- [ ] Reconnect/backoff after Hyprland restarts; current behavior logs and disables live IPC after disconnect.
+- [x] Reconnect/backoff after Hyprland restarts; initial connection failures and event-stream disconnects retry from 250 ms up to a 30 s cap, with the existing poll loop providing the timer.
 - [ ] Event-loop integration for D-Bus; one shared connection and no worker per feature.
 - [ ] Hot-reload configuration without rebuilding or restarting the shell.
 - [x] Hyprland IPC adapter foundation: typed read-only queries for monitors, workspaces, and active window; bounded response size and socket timeouts.
@@ -45,7 +45,7 @@ This Rust project replaces the graphical shell/runtime incrementally. It does no
 - [x] Event-to-state reducer tests for multi-monitor focus, workspace lifecycle, active-window updates, special workspaces, hotplug refreshes, and ignored events.
 - [x] Pure Hyprland event-to-state reducer for focused workspaces/monitors, workspace create/destroy/move/rename, special workspace state, and active-window metadata; emits targeted refresh hints when event payloads are incomplete.
 - [x] Event coordinator joins the non-blocking event stream, reducer, and command IPC; coalesces monitor/workspace/active-window refreshes, reports parse failures without losing neighboring events, and retains failed refreshes for retry.
-- [ ] Reconnect/backoff and Wayland event-loop fd registration for the event socket.
+- [x] Reconnect/backoff and Wayland event-loop fd registration for the event socket; reconnect deadlines are integrated into the existing blocking poll loop.
 
 ## Phase 2 — desktop shell parity
 
@@ -89,6 +89,7 @@ Hard constraints:
 - Uses the synchronized Wayland prepare_read/read/dispatch_pending sequence, avoiding competing reads from the display socket.
 - Added an allocation-free per-output frame scheduler. Redraw requests coalesce while a frame callback is outstanding and remain pending when no SHM slot is writable; dispatching buffer-release events retries pending paints.
 - Requests wl_surface.frame for each submitted panel commit and schedules a follow-up only when a state/configure invalidation arrived during the prior frame.
-- Hyprland connection is optional at startup. A broadcast socket disconnect logs and disables live updates; automatic reconnect remains outstanding.
+- Hyprland connection is optional at startup. If either socket is unavailable, or the broadcast stream closes, the shell retries with bounded exponential backoff from 250 ms to 30 s. The retry deadline is folded into poll(2)'s timeout, so no timer thread or periodic wakeup is added; successful reconnection takes a fresh snapshot and invalidates all panels.
 - Event batches apply the reducer and run only coalesced pending monitor/workspace/window queries. Those command queries remain synchronous with the existing bounded socket timeout, so moving them off the event-loop critical path remains future work.
+- The upstream `HyprlandData.qml` singleton listens to `Hyprland.onRawEvent` and schedules its data refreshes; the Rust adapter preserves the event-driven model while coalescing targeted queries and now reconnecting its socket after compositor restarts.
 - No real NixOS/Hyprland runtime test or RSS benchmark has been performed.
