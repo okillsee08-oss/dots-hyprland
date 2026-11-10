@@ -6,13 +6,75 @@
 //! Refresh flags are coalesced, and failed queries remain pending for retry.
 //! This module deliberately does not own or poll the Wayland event loop yet.
 
-use std::{io, os::fd::RawFd};
+use std::{
+    io,
+    os::fd::RawFd,
+    time::{Duration, Instant},
+};
 
 use crate::{
     hyprland_events::{EventParseError, HyprlandEventStream},
     hyprland_ipc::{HyprlandIpc, IpcError, Snapshot},
     hyprland_state::{HyprlandState, StateChange},
 };
+
+const INITIAL_RECONNECT_DELAY: Duration = Duration::from_millis(250);
+const MAX_RECONNECT_DELAY: Duration = Duration::from_secs(30);
+
+/// Bounded exponential retry schedule for a Hyprland socket that is absent or
+/// has disconnected. The event loop converts the deadline to a poll timeout,
+/// so reconnect attempts need no timer thread or periodic wakeups.
+#[derive(Debug, Clone)]
+pub struct ReconnectBackoff {
+    next_attempt: Option<Instant>,
+    next_delay: Duration,
+}
+
+impl Default for ReconnectBackoff {
+    fn default() -> Self {
+        Self {
+            next_attempt: None,
+            next_delay: INITIAL_RECONNECT_DELAY,
+        }
+    }
+}
+
+impl ReconnectBackoff {
+    /// Schedule the next attempt and return its monotonic deadline.
+    pub fn schedule_retry(&mut self, now: Instant) -> Instant {
+        let deadline = now + self.next_delay;
+        self.next_attempt = Some(deadline);
+        self.next_delay = self.next_delay.saturating_mul(2).min(MAX_RECONNECT_DELAY);
+        deadline
+    }
+
+    pub fn is_due(&self, now: Instant) -> bool {
+        self.next_attempt.is_some_and(|deadline| now >= deadline)
+    }
+
+    /// Return a poll(2) timeout in milliseconds, rounding up so a sub-ms
+    /// remainder cannot cause a premature retry. -1 means no retry is armed.
+    pub fn poll_timeout_ms(&self, now: Instant) -> i32 {
+        let Some(deadline) = self.next_attempt else {
+            return -1;
+        };
+        let remaining = deadline.saturating_duration_since(now);
+        let fractional_millisecond = if remaining.subsec_nanos() % 1_000_000 == 0 {
+            0
+        } else {
+            1
+        };
+        let millis = remaining.as_millis() + fractional_millisecond;
+        i32::try_from(millis).unwrap_or(i32::MAX)
+    }
+
+    /// Clear the retry deadline and restore the initial delay after a
+    /// successful connection.
+    pub fn connected(&mut self) {
+        self.next_attempt = None;
+        self.next_delay = INITIAL_RECONNECT_DELAY;
+    }
+}
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct RefreshPlan {
@@ -312,4 +374,51 @@ mod tests {
         assert!(!runtime.apply_snapshot(snapshot));
         assert!(runtime.pending_refresh().is_empty());
     }
+
+    #[test]
+    fn reconnect_deadline_and_poll_timeout_are_exact() {
+        let now = Instant::now();
+        let mut backoff = ReconnectBackoff::default();
+
+        assert_eq!(backoff.poll_timeout_ms(now), -1);
+        let deadline = backoff.schedule_retry(now);
+        assert_eq!(deadline.duration_since(now), Duration::from_millis(250));
+        assert_eq!(backoff.poll_timeout_ms(now), 250);
+        assert!(!backoff.is_due(deadline - Duration::from_nanos(1)));
+        assert_eq!(
+            backoff.poll_timeout_ms(deadline - Duration::from_nanos(1)),
+            1
+        );
+        assert!(backoff.is_due(deadline));
+        assert_eq!(backoff.poll_timeout_ms(deadline), 0);
+    }
+
+    #[test]
+    fn reconnect_backoff_doubles_and_stops_at_thirty_seconds() {
+        let now = Instant::now();
+        let mut backoff = ReconnectBackoff::default();
+
+        for expected_ms in [250, 500, 1_000, 2_000, 4_000, 8_000, 16_000, 30_000, 30_000] {
+            let deadline = backoff.schedule_retry(now);
+            assert_eq!(
+                deadline.duration_since(now),
+                Duration::from_millis(expected_ms)
+            );
+        }
+    }
+
+    #[test]
+    fn successful_reconnect_clears_deadline_and_resets_backoff() {
+        let now = Instant::now();
+        let mut backoff = ReconnectBackoff::default();
+        backoff.schedule_retry(now);
+        backoff.schedule_retry(now);
+
+        backoff.connected();
+
+        assert_eq!(backoff.poll_timeout_ms(now), -1);
+        let deadline = backoff.schedule_retry(now);
+        assert_eq!(deadline.duration_since(now), Duration::from_millis(250));
+    }
+
 }
