@@ -148,7 +148,7 @@ impl RustShell {
                 .layer
                 .wl_surface()
                 .set_buffer_scale(scale_factor as i32);
-            let geometry = panel
+            panel
                 .geometry
                 .map(|current| {
                     PanelGeometry::from_logical_size(
@@ -157,8 +157,7 @@ impl RustShell {
                         scale_factor,
                     )
                 })
-                .transpose()?;
-            geometry
+                .transpose()?
         };
 
         if let Some(geometry) = geometry {
@@ -258,9 +257,11 @@ impl RustShell {
 
         let mut buffers = Vec::with_capacity(BUFFERS_PER_OUTPUT);
         for _ in 0..BUFFERS_PER_OUTPUT {
-            let (buffer, canvas) =
-                pool.create_buffer(width, height, stride, wl_shm::Format::Argb8888)?;
-            drop(canvas);
+            let buffer = {
+                let (buffer, _canvas) =
+                    pool.create_buffer(width, height, stride, wl_shm::Format::Argb8888)?;
+                buffer
+            };
             buffers.push(buffer);
         }
         panel.buffers = buffers;
@@ -332,12 +333,12 @@ fn normalized_scale(scale_factor: i32) -> u32 {
 }
 
 fn output_logical_width(info: &OutputInfo, scale_factor: u32) -> Option<u32> {
-    if let Some((width, _)) = info.logical_size {
-        if let Ok(width) = u32::try_from(width) {
-            if width > 0 {
-                return Some(width);
-            }
-        }
+    if let Some(width) = info
+        .logical_size
+        .and_then(|(width, _)| u32::try_from(width).ok())
+        .filter(|width| *width > 0)
+    {
+        return Some(width);
     }
 
     info.modes
