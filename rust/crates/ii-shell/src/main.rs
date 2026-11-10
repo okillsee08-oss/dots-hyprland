@@ -69,9 +69,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         Err(error) => {
             reconnect.schedule_retry(Instant::now());
             let retry_in_ms = reconnect.poll_timeout_ms(Instant::now());
-            eprintln!(
-                "ii-shell: Hyprland IPC unavailable; retrying in {retry_in_ms} ms: {error}"
-            );
+            eprintln!("ii-shell: Hyprland IPC unavailable; retrying in {retry_in_ms} ms: {error}");
             None
         }
     };
