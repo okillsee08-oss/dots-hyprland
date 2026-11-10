@@ -420,5 +420,5 @@ mod tests {
         let deadline = backoff.schedule_retry(now);
         assert_eq!(deadline.duration_since(now), Duration::from_millis(250));
     }
-
 }
+
