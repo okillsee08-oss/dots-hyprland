@@ -27,8 +27,8 @@ use smithay_client_toolkit::{
     registry::{ProvidesRegistryState, RegistryState},
     registry_handlers,
     seat::{
-        pointer::{BTN_BACK, BTN_LEFT, PointerEvent, PointerEventKind, PointerHandler},
         Capability, SeatHandler, SeatState,
+        pointer::{BTN_BACK, BTN_LEFT, PointerEvent, PointerEventKind, PointerHandler},
     },
     shell::{
         WaylandSurface,
@@ -931,14 +931,12 @@ impl PointerHandler for RustShell {
             let action = self.workspace_models.get(&output_id).and_then(|model| {
                 let index = model.workspace_index_at(event.position.0, event.position.1);
                 match &event.kind {
-                    PointerEventKind::Press { button, .. } if *button == BTN_LEFT => {
-                        index.and_then(|index| model.workspace_id_at(index)).map(|workspace_id| {
-                            WorkspaceCommand::Focus {
-                                monitor_name: model.monitor_name.clone(),
-                                workspace_id,
-                            }
-                        })
-                    }
+                    PointerEventKind::Press { button, .. } if *button == BTN_LEFT => index
+                        .and_then(|index| model.workspace_id_at(index))
+                        .map(|workspace_id| WorkspaceCommand::Focus {
+                            monitor_name: model.monitor_name.clone(),
+                            workspace_id,
+                        }),
                     PointerEventKind::Press { button, .. } if *button == BTN_BACK => {
                         index.map(|_| WorkspaceCommand::ToggleSpecial {
                             monitor_name: model.monitor_name.clone(),

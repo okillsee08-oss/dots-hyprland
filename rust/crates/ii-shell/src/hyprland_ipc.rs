@@ -119,9 +119,7 @@ impl WorkspaceCommand {
                 WorkspaceDirection::Next => "dispatch workspace r+1".to_owned(),
                 WorkspaceDirection::Previous => "dispatch workspace r-1".to_owned(),
             },
-            Self::ToggleSpecial { .. } => {
-                "dispatch togglespecialworkspace special".to_owned()
-            }
+            Self::ToggleSpecial { .. } => "dispatch togglespecialworkspace special".to_owned(),
         };
 
         // Focus the panel's output before applying the action. This preserves
