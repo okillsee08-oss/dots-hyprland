@@ -10,6 +10,7 @@ use std::{
 
 use ii_shell::{
     hyprland_ipc::{HyprlandIpc, WorkspaceCommand, WorkspaceDirection},
+    config::WorkspaceBarConfig,
     hyprland_state::HyprlandState,
     output_model::PanelGeometry,
     render, text,
@@ -47,9 +48,6 @@ const PANEL_HEIGHT: u32 = 36;
 const INITIAL_WIDTH: u32 = 1280;
 const PANEL_NAMESPACE: &str = "ii-rust-panel";
 const BUFFERS_PER_OUTPUT: usize = 2;
-// Matches the upstream Config.qml default; config hot-reload is a later milestone.
-const WORKSPACE_SHOWN_COUNT: usize = 10;
-
 const COMMAND_QUEUE_CAPACITY: usize = 8;
 
 /// One small worker keeps synchronous command-socket I/O out of Wayland
@@ -111,6 +109,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let pool = SlotPool::new((INITIAL_WIDTH * PANEL_HEIGHT * 4) as usize, &shm)?;
     let command_worker = HyprlandCommandWorker::spawn()?;
+    let workspace_shown_count = WorkspaceBarConfig::load().shown;
     let mut shell = RustShell {
         registry_state: RegistryState::new(&globals),
         seat_state: SeatState::new(&globals, &queue_handle),
@@ -124,6 +123,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         text: text::TextEngine::new(),
         panels: HashMap::new(),
         workspace_models: HashMap::new(),
+        workspace_shown_count,
         workspace_models_dirty: false,
         closed: false,
     };
@@ -304,6 +304,7 @@ struct RustShell {
     text: text::TextEngine,
     panels: HashMap<u32, PanelSurface>,
     workspace_models: HashMap<u32, WorkspaceModel>,
+    workspace_shown_count: usize,
     workspace_models_dirty: bool,
     closed: bool,
 }
@@ -398,7 +399,7 @@ impl RustShell {
             match WorkspaceModel::from_monitor(
                 monitor,
                 &state.workspaces,
-                WORKSPACE_SHOWN_COUNT,
+                self.workspace_shown_count,
                 false,
             ) {
                 Ok(model) => {
