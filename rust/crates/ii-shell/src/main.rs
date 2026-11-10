@@ -943,9 +943,7 @@ impl PointerHandler for RustShell {
                         })
                     }
                     PointerEventKind::Axis { vertical, .. } => {
-                        if index.is_none() {
-                            return None;
-                        }
+                        index?;
                         let amount = if vertical.value120 != 0 {
                             f64::from(vertical.value120)
                         } else if vertical.discrete != 0 {
