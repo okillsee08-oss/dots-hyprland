@@ -52,7 +52,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         closed: false,
     };
 
-    let mut hyprland = match ii_shell::hyprland_runtime::HyprlandRuntime::connect_from_environment() {
+    let mut hyprland = match ii_shell::hyprland_runtime::HyprlandRuntime::connect_from_environment()
+    {
         Ok(runtime) => {
             eprintln!("ii-shell: connected to Hyprland event and command sockets");
             Some(runtime)
@@ -396,7 +397,8 @@ impl RustShell {
     }
 
     fn draw_pending_outputs(&mut self, qh: &QueueHandle<Self>) -> Result<(), Box<dyn Error>> {
-        let output_ids: Vec<_> = self.panels
+        let output_ids: Vec<_> = self
+            .panels
             .iter()
             .filter_map(|(id, panel)| panel.frame_scheduler.can_draw().then_some(*id))
             .collect();
