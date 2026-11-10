@@ -55,8 +55,7 @@ pub fn draw_workspace_strip(
             continue;
         }
         let previous = index > 0 && model.slots[index - 1].visibly_occupied();
-        let next = index + 1 < model.slots.len()
-            && model.slots[index + 1].visibly_occupied();
+        let next = index + 1 < model.slots.len() && model.slots[index + 1].visibly_occupied();
         let left_extension = if previous { button / 2.0 } else { 0.0 };
         let right_extension = if next { button / 2.0 } else { 0.0 };
         let x = origin_x + index as f32 * button - left_extension + (button - active) / 2.0;
@@ -105,14 +104,7 @@ pub fn draw_workspace_strip(
     }
 }
 
-fn fill_rect(
-    pixmap: &mut PixmapMut<'_>,
-    x: f32,
-    y: f32,
-    width: f32,
-    height: f32,
-    color: Color,
-) {
+fn fill_rect(pixmap: &mut PixmapMut<'_>, x: f32, y: f32, width: f32, height: f32, color: Color) {
     let Some(rect) = Rect::from_xywh(x, y, width, height) else {
         return;
     };
@@ -151,9 +143,21 @@ mod tests {
             active_index: 0,
             fake_workspace_id: -9999,
             slots: vec![
-                WorkspaceSlot { id: 1, occupied: false, is_fake: false },
-                WorkspaceSlot { id: 2, occupied: false, is_fake: false },
-                WorkspaceSlot { id: 3, occupied: true, is_fake: false },
+                WorkspaceSlot {
+                    id: 1,
+                    occupied: false,
+                    is_fake: false,
+                },
+                WorkspaceSlot {
+                    id: 2,
+                    occupied: false,
+                    is_fake: false,
+                },
+                WorkspaceSlot {
+                    id: 3,
+                    occupied: true,
+                    is_fake: false,
+                },
             ],
             special_workspace_name: None,
         };

@@ -7,9 +7,7 @@ use std::{
 };
 
 use ii_shell::{
-    hyprland_state::HyprlandState,
-    output_model::PanelGeometry,
-    render, text,
+    hyprland_state::HyprlandState, output_model::PanelGeometry, render, text,
     workspace_model::WorkspaceModel,
 };
 use smithay_client_toolkit::reexports::client::{
@@ -318,7 +316,10 @@ impl RustShell {
                     self.workspace_models.insert(output_id, model);
                 }
                 Err(error) => {
-                    eprintln!("ii-shell: workspace model for {} failed: {error}", panel.output_name);
+                    eprintln!(
+                        "ii-shell: workspace model for {} failed: {error}",
+                        panel.output_name
+                    );
                 }
             }
         }
@@ -549,9 +550,10 @@ impl RustShell {
                 );
             }
             let scale = geometry.scale_factor as i32;
-            let title_x = workspace_models.get(&output_id).map_or(20, |model| {
-                (8 + model.slots.len() as u32 * 26 + 8) as i32
-            }) * scale;
+            let title_x = workspace_models
+                .get(&output_id)
+                .map_or(20, |model| (8 + model.slots.len() as u32 * 26 + 8) as i32)
+                * scale;
             text.draw_text(
                 pixels,
                 geometry.buffer_width,
@@ -730,7 +732,8 @@ impl OutputHandler for RustShell {
             self.workspace_models.remove(&output_id);
         } else {
             self.panels.retain(|_, panel| panel.output != output);
-            self.workspace_models.retain(|id, _| self.panels.contains_key(id));
+            self.workspace_models
+                .retain(|id, _| self.panels.contains_key(id));
         }
     }
 }
