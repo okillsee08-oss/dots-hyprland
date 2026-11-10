@@ -2,7 +2,7 @@
 //!
 //! Queries are bounded and synchronous. Call them from startup or a worker,
 //! never from a Wayland dispatch callback. Event-stream integration and
-//! reconnect/backoff are a separate runtime milestone.
+//! reconnect/backoff are coordinated by `hyprland_runtime` and the shell loop.
 
 use std::{
     env,
