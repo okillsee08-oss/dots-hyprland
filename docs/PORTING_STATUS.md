@@ -3,7 +3,7 @@
 **Branch:** `rust-port/phase-0`  
 **Upstream:** `end-4/dots-hyprland`  
 **Reference revision at port start:** `2f2a376fdb2ad738bf55f693dd0b474b64bb0ab8`  
-**Latest upstream inspected (2026-11-08):** `cb1c428bf841dabccff1b126904047c28e89ba8c`
+**Latest upstream inspected (2026-11-10):** `cb1c428bf841dabccff1b126904047c28e89ba8c`
 
 ## What is being ported
 
@@ -27,10 +27,16 @@ This Rust project replaces the graphical shell/runtime incrementally. It does no
 
 ## Phase 1 — platform/runtime
 
-- Output hotplug, scale-factor changes, fractional scaling policy, multi-monitor panel instances.
-- Input seats, pointer/keyboard focus, shortcut and IPC handling.
-- Buffer lifecycle/reuse, damage tracking, frame callbacks, bounded buffer count.
-- Event-loop integration for D-Bus; one shared connection and no worker per feature.
+- [x] Create one output-bound top-panel layer surface per advertised `wl_output`, keyed by the output global id; remove its surface on output destruction.
+- [x] Track output logical width and integer scale-factor changes, with checked logical-to-buffer geometry conversion.
+- [x] Allocate two SHM buffers per output geometry and retain/reuse each `wl_buffer` only after its slot becomes writable following compositor release. Rebuild the bounded pair when geometry changes.
+- [ ] Add frame-callback-driven redraw scheduling when both buffers are busy; add partial damage tracking.
+- [ ] Define and test fractional-scale policy; current path uses integer `wl_output` scale factors.
+- [ ] Validate output hotplug, scale changes, suspend/resume and multiple outputs on a real NixOS/Hyprland session.
+- [ ] Input seats, pointer/keyboard focus, shortcut and IPC handling.
+- [ ] Hyprland event socket registration with the main Wayland event loop, reconnect/backoff, and redraw scheduling from state changes.
+- [ ] Event-loop integration for D-Bus; one shared connection and no worker per feature.
+- [ ] Hot-reload configuration without rebuilding or restarting the shell.
 - [x] Hyprland IPC adapter foundation: typed read-only queries for monitors, workspaces, and active window; bounded response size and socket timeouts.
 - [x] Pure per-monitor workspace model: active-group calculation, occupied/fake workspace indicators, safe slot lookup, and special-workspace naming, with edge-case tests.
 - [x] Hyprland event-socket foundation: bounded incremental line decoder, typed workspace/window/monitor events, unknown-event preservation, and non-blocking socket drain API.
@@ -38,16 +44,15 @@ This Rust project replaces the graphical shell/runtime incrementally. It does no
 - [x] Pure Hyprland event-to-state reducer for focused workspaces/monitors, workspace create/destroy/move/rename, special workspace state, and active-window metadata; emits targeted refresh hints when event payloads are incomplete.
 - [x] Event coordinator joins the non-blocking event stream, reducer, and command IPC; coalesces monitor/workspace/active-window refreshes, reports parse failures without losing neighboring events, and retains failed refreshes for retry.
 - [ ] Reconnect/backoff and Wayland event-loop fd registration for the event socket.
-- Hot-reload configuration without rebuilding or restarting the shell.
 
 ## Phase 2 — desktop shell parity
 
 Port and test one subsystem at a time:
 
-1. Top bar: workspace grouping/occupancy data model is implemented; remaining work includes native workspace rendering and interactions, active-window presentation, clock, system tray, battery, network, volume, media, notifications and resource indicators.
+1. Top bar: per-output surfaces and workspace grouping/occupancy data model are implemented; remaining work includes native workspace rendering and interactions, active-window presentation, clock, system tray, battery, network, volume, media, notifications and resource indicators.
 2. Quick settings and sidebars: toggles, device status, controls, search and settings launch.
 3. Overview and window management: foreign-toplevel tracking, previews only on demand, workspace movement.
-4. Dock and app launcher: .desktop indexing, fuzzy search, activation and pinned apps.
+4. Dock and app launcher: `.desktop` indexing, fuzzy search, activation and pinned apps.
 5. OSD, notifications and media: freedesktop notifications, MPRIS, audio and brightness state.
 6. Background widgets, wallpaper chooser, wallpaper-derived Material palette and lock screen.
 7. Screenshot/region tools, clipboard history, on-screen keyboard, translation and AI integrations as separately spawned optional components.

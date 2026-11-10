@@ -4,7 +4,7 @@
 
 1. Preserve the original repository's Hyprland configuration, setup scripts, assets, and license.
 2. Replace the Quickshell UI/runtime with a native Rust Linux desktop shell.
-3. Keep the runtime small and idle-friendly: one Wayland connection, one shared D-Bus session connection, bounded/reused SHM buffers, shared font caches, no per-widget threads, and redraw only when state changes.
+3. Keep the runtime small and idle-friendly: one Wayland connection, one shared D-Bus session connection, bounded/reused SHM buffers, shared font caches, one panel per output, no per-widget threads, and redraw only when state changes.
 4. Port behavior by subsystem and verify parity before retiring any QML implementation.
 
 ## Runtime layers
@@ -13,14 +13,12 @@
 Hyprland / Wayland compositor
           │
           ▼
- smithay-client-toolkit ── layer surfaces, outputs, input, frame events
-          │
-          ├── tiny-skia ────── CPU rendering into wl_shm buffers
-          │
+ smithay-client-toolkit ── per-output layer surfaces, output lifecycle,
+          │                 scale changes, input and frame events
+          ├── tiny-skia ────── CPU rendering into reusable wl_shm buffers
           ├── cosmic-text ──── font discovery, shaping, glyph cache
-          │
           └── zbus ────────── NetworkManager, UPower, MPRIS, portals,
-                               notifications, power and desktop services
+                              notifications, power and desktop services
           │
           ▼
  Rust shell state ── config, theme, panel models, IPC and actions
@@ -38,6 +36,7 @@ The Hyprland compositor remains responsible for windows and composition. This pr
 - `crates/ii-shell/src/text.rs`: a shared cosmic-text font system and glyph cache.
 - `crates/ii-shell/src/bus.rs`: shared D-Bus session connection boundary.
 - `crates/ii-shell/src/config.rs`: versionable shell settings model.
+- `crates/ii-shell/src/output_model.rs`: checked logical-to-buffer geometry for output-bound panels.
 - `crates/ii-shell/src/hyprland_ipc.rs`: bounded typed Hyprland command-socket queries.
 - `crates/ii-shell/src/workspace_model.rs`: per-monitor workspace grouping and occupancy projection.
 - `crates/ii-shell/src/hyprland_state.rs`: pure event-to-state reducer with targeted refresh hints.
@@ -54,16 +53,18 @@ cargo test --manifest-path rust/Cargo.toml --workspace
 cargo run --manifest-path rust/Cargo.toml -p ii-shell
 ```
 
-The first panel requires a Wayland compositor advertising `zwlr_layer_shell_v1` (Hyprland does). The Hyprland runtime coordinator is currently a separately tested component; the event fd is not yet registered with the main Wayland event loop. The project remains an early proof-of-life, not a complete desktop shell.
+The executable now creates one top-panel layer surface for every advertised Wayland output. Output removal drops its surface and retained buffers; output scale changes rebuild only that output's bounded buffer pair. Hyprland's event coordinator remains a separately tested component and is not yet registered with the main Wayland event loop. The project remains an early proof-of-life, not a complete desktop shell.
 
 ## Memory rules
 
 - Reuse one `FontSystem` and one `SwashCache` for the process.
-- Reuse the Wayland SHM pool; avoid a new full-screen heap pixmap for every paint.
-- Paint directly into the SHM slot with tiny-skia, then convert its RGBA bytes to Wayland ARGB byte order in place.
+- Keep two `wl_buffer` objects per output geometry; write only to a buffer whose release has made its slot writable.
+- Drop/rebuild only the affected output's buffer pair when its logical geometry or integer scale changes.
+- Paint directly into SHM slots with tiny-skia; avoid an intermediate full-frame heap pixmap.
 - Keep rendering event-driven. No permanent animation timer or polling loop for unchanged state.
 - Use one session-bus connection shared by service adapters. Avoid one D-Bus connection/thread per widget.
 - Keep heavyweight features (AI, image/video processing, previews) out of the always-running base process; spawn them on demand.
+- Keep buffers, caches, histories and notification queues bounded.
 - Measure RSS, allocations, wakeups, frame time, and buffer count on the same machine as the upstream shell. Do not claim a memory win without measurements.
 
 ## Porting rule

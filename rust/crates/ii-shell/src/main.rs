@@ -1,15 +1,10 @@
-use std::{error::Error, num::NonZeroU32};
+use std::{collections::HashMap, error::Error, num::NonZeroU32};
 
-use ii_shell::{render, text};
-use smithay_client_toolkit::reexports::client::{
-    Connection, QueueHandle,
-    globals::registry_queue_init,
-    protocol::{wl_output, wl_shm, wl_surface},
-};
+use ii_shell::{output_model::PanelGeometry, render, text};
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState},
     delegate_registry,
-    output::{OutputHandler, OutputState},
+    output::{OutputHandler, OutputInfo, OutputState},
     registry::{ProvidesRegistryState, RegistryState},
     registry_handlers,
     shell::{
@@ -19,12 +14,18 @@ use smithay_client_toolkit::{
             LayerSurfaceConfigure,
         },
     },
-    shm::{Shm, ShmHandler, slot::SlotPool},
+    shm::{Shm, ShmHandler, slot::{Buffer, SlotPool}},
+};
+use smithay_client_toolkit::reexports::client::{
+    Connection, QueueHandle,
+    globals::registry_queue_init,
+    protocol::{wl_output, wl_shm, wl_surface},
 };
 
 const PANEL_HEIGHT: u32 = 36;
 const INITIAL_WIDTH: u32 = 1280;
 const PANEL_NAMESPACE: &str = "ii-rust-panel";
+const BUFFERS_PER_OUTPUT: usize = 2;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let connection = Connection::connect_to_env()?;
@@ -35,90 +36,305 @@ fn main() -> Result<(), Box<dyn Error>> {
     let layer_shell = LayerShell::bind(&globals, &queue_handle)?;
     let shm = Shm::bind(&globals, &queue_handle)?;
 
-    let surface = compositor.create_surface(&queue_handle);
-    let layer = layer_shell.create_layer_surface(
-        &queue_handle,
-        surface,
-        Layer::Top,
-        Some(PANEL_NAMESPACE),
-        None,
-    );
-
-    layer.set_anchor(Anchor::TOP | Anchor::LEFT | Anchor::RIGHT);
-    layer.set_size(0, PANEL_HEIGHT);
-    layer.set_exclusive_zone(PANEL_HEIGHT as i32);
-    layer.set_keyboard_interactivity(KeyboardInteractivity::None);
-    layer.commit();
-
     let pool = SlotPool::new((INITIAL_WIDTH * PANEL_HEIGHT * 4) as usize, &shm)?;
-
     let mut shell = RustShell {
         registry_state: RegistryState::new(&globals),
         output_state: OutputState::new(&globals, &queue_handle),
+        compositor,
+        layer_shell,
         shm,
         pool,
-        layer,
         text: text::TextEngine::new(),
-        width: INITIAL_WIDTH,
-        height: PANEL_HEIGHT,
+        panels: HashMap::new(),
         closed: false,
     };
 
-    eprintln!("ii-shell: waiting for the first layer-shell configure");
+    eprintln!("ii-shell: waiting for Wayland outputs");
     while !shell.closed {
         event_queue.blocking_dispatch(&mut shell)?;
     }
     Ok(())
 }
 
+struct PanelSurface {
+    output: wl_output::WlOutput,
+    layer: LayerSurface,
+    fallback_width: Option<u32>,
+    scale_factor: u32,
+    geometry: Option<PanelGeometry>,
+    buffers: Vec<Buffer>,
+}
+
 struct RustShell {
     registry_state: RegistryState,
     output_state: OutputState,
+    compositor: CompositorState,
+    layer_shell: LayerShell,
     shm: Shm,
     pool: SlotPool,
-    layer: LayerSurface,
     text: text::TextEngine,
-    width: u32,
-    height: u32,
+    panels: HashMap<u32, PanelSurface>,
     closed: bool,
 }
 
 impl RustShell {
-    fn draw(&mut self) -> Result<(), Box<dyn Error>> {
-        let width = self.width.max(1);
-        let height = self.height.max(1);
-        let stride = i32::try_from(width.checked_mul(4).ok_or("panel width overflow")?)?;
-
-        let (buffer, pixels) = self.pool.create_buffer(
-            width as i32,
-            height as i32,
-            stride,
-            wl_shm::Format::Argb8888,
-        )?;
-
-        render::draw_panel(pixels, width, height);
-        self.text.draw_text(
-            pixels,
-            width,
-            height,
-            "illogical impulse · Rust",
-            (20, 0),
-            14.0,
-        );
-
-        // tiny-skia and cosmic-text write premultiplied RGBA. WL_SHM_FORMAT_ARGB8888
-        // is BGRA in little-endian memory, so swap red/blue in place: no staging image.
-        for pixel in pixels.chunks_exact_mut(4) {
-            pixel.swap(0, 2);
+    fn add_output(
+        &mut self,
+        qh: &QueueHandle<Self>,
+        output: wl_output::WlOutput,
+        info: OutputInfo,
+    ) -> Result<(), Box<dyn Error>> {
+        let output_id = info.id;
+        if self.panels.contains_key(&output_id) {
+            return self.update_output_metrics(output_id, &info);
         }
 
-        buffer.attach_to(self.layer.wl_surface())?;
-        self.layer
-            .wl_surface()
-            .damage_buffer(0, 0, width as i32, height as i32);
-        self.layer.commit();
+        let scale_factor = normalized_scale(info.scale_factor);
+        let fallback_width = output_logical_width(&info, scale_factor);
+        let surface = self.compositor.create_surface(qh);
+        let layer = self.layer_shell.create_layer_surface(
+            qh,
+            surface,
+            Layer::Top,
+            Some(format!("{PANEL_NAMESPACE}-{output_id}")),
+            Some(&output),
+        );
+
+        layer.set_anchor(Anchor::TOP | Anchor::LEFT | Anchor::RIGHT);
+        layer.set_size(0, PANEL_HEIGHT);
+        layer.set_exclusive_zone(PANEL_HEIGHT as i32);
+        layer.set_keyboard_interactivity(KeyboardInteractivity::None);
+        layer.wl_surface().set_buffer_scale(scale_factor as i32);
+        layer.commit();
+
+        eprintln!(
+            "ii-shell: created panel for output {} ({}) at scale {}",
+            info.name.as_deref().unwrap_or("unnamed"),
+            output_id,
+            scale_factor
+        );
+
+        self.panels.insert(
+            output_id,
+            PanelSurface {
+                output,
+                layer,
+                fallback_width,
+                scale_factor,
+                geometry: None,
+                buffers: Vec::with_capacity(BUFFERS_PER_OUTPUT),
+            },
+        );
         Ok(())
     }
+
+    fn update_output_metrics(
+        &mut self,
+        output_id: u32,
+        info: &OutputInfo,
+    ) -> Result<(), Box<dyn Error>> {
+        let scale_factor = normalized_scale(info.scale_factor);
+        let fallback_width = output_logical_width(info, scale_factor);
+        let (layer, geometry) = {
+            let Some(panel) = self.panels.get_mut(&output_id) else {
+                return Ok(());
+            };
+            panel.fallback_width = fallback_width.or(panel.fallback_width);
+            panel.scale_factor = scale_factor;
+            panel.layer.wl_surface().set_buffer_scale(scale_factor as i32);
+            let geometry = panel
+                .geometry
+                .map(|current| {
+                    PanelGeometry::from_logical_size(
+                        panel.fallback_width.unwrap_or(current.logical_width),
+                        current.logical_height,
+                        scale_factor,
+                    )
+                })
+                .transpose()?;
+            (panel.layer.clone(), geometry)
+        };
+
+        if let Some(geometry) = geometry {
+            if self.set_panel_geometry(output_id, geometry)? {
+                self.draw_output(output_id)?;
+            }
+        }
+        // Keep the layer alive while output metadata is being updated.
+        drop(layer);
+        Ok(())
+    }
+
+    fn update_panel_scale(
+        &mut self,
+        output_id: u32,
+        scale_factor: i32,
+    ) -> Result<(), Box<dyn Error>> {
+        let Ok(scale_factor) = u32::try_from(scale_factor) else {
+            return Ok(());
+        };
+        if scale_factor == 0 {
+            return Ok(());
+        }
+
+        let geometry = {
+            let Some(panel) = self.panels.get_mut(&output_id) else {
+                return Ok(());
+            };
+            panel.scale_factor = scale_factor;
+            panel.layer.wl_surface().set_buffer_scale(scale_factor as i32);
+            panel.geometry.map(|current| {
+                PanelGeometry::from_logical_size(
+                    current.logical_width,
+                    current.logical_height,
+                    scale_factor,
+                )
+            }).transpose()?
+        };
+
+        if let Some(geometry) = geometry {
+            if self.set_panel_geometry(output_id, geometry)? {
+                self.draw_output(output_id)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn configure_panel(
+        &mut self,
+        output_id: u32,
+        configured_size: (u32, u32),
+    ) -> Result<(), Box<dyn Error>> {
+        let geometry = {
+            let panel = self
+                .panels
+                .get(&output_id)
+                .ok_or("configured layer surface has no output owner")?;
+            PanelGeometry::from_configure(
+                configured_size,
+                panel.fallback_width,
+                panel.scale_factor,
+                PANEL_HEIGHT,
+            )?
+        };
+        self.set_panel_geometry(output_id, geometry)?;
+        self.draw_output(output_id)
+    }
+
+    /// Allocate a bounded pair of buffers for a new geometry. Buffer objects
+    /// are retained and reused only after wl_buffer.release makes their slots
+    /// writable again.
+    fn set_panel_geometry(
+        &mut self,
+        output_id: u32,
+        geometry: PanelGeometry,
+    ) -> Result<bool, Box<dyn Error>> {
+        let stride = i32::try_from(
+            geometry
+                .buffer_width
+                .checked_mul(4)
+                .ok_or("panel stride overflow")?,
+        )?;
+        let width = i32::try_from(geometry.buffer_width)?;
+        let height = i32::try_from(geometry.buffer_height)?;
+
+        let (pool, panels) = (&mut self.pool, &mut self.panels);
+        let panel = panels
+            .get_mut(&output_id)
+            .ok_or("panel output disappeared during configure")?;
+        if panel.geometry == Some(geometry) {
+            return Ok(false);
+        }
+
+        let mut buffers = Vec::with_capacity(BUFFERS_PER_OUTPUT);
+        for _ in 0..BUFFERS_PER_OUTPUT {
+            let (buffer, canvas) =
+                pool.create_buffer(width, height, stride, wl_shm::Format::Argb8888)?;
+            drop(canvas);
+            buffers.push(buffer);
+        }
+        panel.buffers = buffers;
+        panel.geometry = Some(geometry);
+        Ok(true)
+    }
+
+    fn draw_output(&mut self, output_id: u32) -> Result<(), Box<dyn Error>> {
+        let (pool, text, panels) = (&mut self.pool, &mut self.text, &mut self.panels);
+        let Some(panel) = panels.get_mut(&output_id) else {
+            return Ok(());
+        };
+        let Some(geometry) = panel.geometry else {
+            return Ok(());
+        };
+
+        // Never write into a slot still owned by the compositor. If both
+        // buffers are busy, skip this paint; a later state/configure event
+        // can retry after a release has been dispatched.
+        let Some(buffer_index) = panel
+            .buffers
+            .iter()
+            .position(|buffer| buffer.canvas(pool).is_some())
+        else {
+            return Ok(());
+        };
+
+        let buffer = &panel.buffers[buffer_index];
+        {
+            let pixels = buffer
+                .canvas(pool)
+                .ok_or("SHM buffer became busy before drawing")?;
+            render::draw_panel(pixels, geometry.buffer_width, geometry.buffer_height);
+            let scale = geometry.scale_factor as i32;
+            text.draw_text(
+                pixels,
+                geometry.buffer_width,
+                geometry.buffer_height,
+                "illogical impulse · Rust",
+                (20 * scale, 0),
+                14.0 * scale as f32,
+            );
+
+            // tiny-skia/cosmic-text write premultiplied RGBA. ARGB8888 is
+            // BGRA in little-endian memory; convert in place without staging.
+            for pixel in pixels.chunks_exact_mut(4) {
+                pixel.swap(0, 2);
+            }
+        }
+
+        let surface = panel.layer.wl_surface().clone();
+        buffer.attach_to(&surface)?;
+        surface.damage_buffer(
+            0,
+            0,
+            geometry.buffer_width as i32,
+            geometry.buffer_height as i32,
+        );
+        panel.layer.commit();
+        Ok(())
+    }
+}
+
+fn normalized_scale(scale_factor: i32) -> u32 {
+    u32::try_from(scale_factor)
+        .ok()
+        .filter(|scale| *scale > 0)
+        .unwrap_or(1)
+}
+
+fn output_logical_width(info: &OutputInfo, scale_factor: u32) -> Option<u32> {
+    if let Some((width, _)) = info.logical_size {
+        if let Ok(width) = u32::try_from(width) {
+            if width > 0 {
+                return Some(width);
+            }
+        }
+    }
+
+    info.modes
+        .iter()
+        .find(|mode| mode.current)
+        .and_then(|mode| u32::try_from(mode.dimensions.0).ok())
+        .map(|width| width.div_ceil(scale_factor))
 }
 
 impl CompositorHandler for RustShell {
@@ -126,9 +342,18 @@ impl CompositorHandler for RustShell {
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _surface: &wl_surface::WlSurface,
-        _new_factor: i32,
+        surface: &wl_surface::WlSurface,
+        new_factor: i32,
     ) {
+        let output_id = self.panels.iter().find_map(|(id, panel)| {
+            (panel.layer.wl_surface() == surface).then_some(*id)
+        });
+        if let Some(output_id) = output_id {
+            if let Err(error) = self.update_panel_scale(output_id, new_factor) {
+                eprintln!("ii-shell: output scale update failed: {error}");
+                self.closed = true;
+            }
+        }
     }
 
     fn transform_changed(
@@ -176,46 +401,82 @@ impl OutputHandler for RustShell {
     fn new_output(
         &mut self,
         _conn: &Connection,
-        _qh: &QueueHandle<Self>,
-        _output: wl_output::WlOutput,
+        qh: &QueueHandle<Self>,
+        output: wl_output::WlOutput,
     ) {
+        let Some(info) = self.output_state.info(&output) else {
+            return;
+        };
+        if let Err(error) = self.add_output(qh, output, info) {
+            eprintln!("ii-shell: failed to create output panel: {error}");
+            self.closed = true;
+        }
     }
 
     fn update_output(
         &mut self,
         _conn: &Connection,
-        _qh: &QueueHandle<Self>,
-        _output: wl_output::WlOutput,
+        qh: &QueueHandle<Self>,
+        output: wl_output::WlOutput,
     ) {
+        let Some(info) = self.output_state.info(&output) else {
+            return;
+        };
+        let result = if self.panels.contains_key(&info.id) {
+            self.update_output_metrics(info.id, &info)
+        } else {
+            self.add_output(qh, output, info)
+        };
+        if let Err(error) = result {
+            eprintln!("ii-shell: failed to update output panel: {error}");
+            self.closed = true;
+        }
     }
 
     fn output_destroyed(
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _output: wl_output::WlOutput,
+        output: wl_output::WlOutput,
     ) {
+        let output_id = self.output_state.info(&output).map(|info| info.id);
+        if let Some(output_id) = output_id {
+            self.panels.remove(&output_id);
+        } else {
+            self.panels.retain(|_, panel| panel.output != output);
+        }
     }
 }
 
 impl LayerShellHandler for RustShell {
-    fn closed(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _layer: &LayerSurface) {
-        self.closed = true;
+    fn closed(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, layer: &LayerSurface) {
+        let output_id = self
+            .panels
+            .iter()
+            .find_map(|(id, panel)| (panel.layer == *layer).then_some(*id));
+        if let Some(output_id) = output_id {
+            self.panels.remove(&output_id);
+        }
     }
 
     fn configure(
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _layer: &LayerSurface,
+        layer: &LayerSurface,
         configure: LayerSurfaceConfigure,
         _serial: u32,
     ) {
-        self.width = NonZeroU32::new(configure.new_size.0).map_or(INITIAL_WIDTH, NonZeroU32::get);
-        self.height = NonZeroU32::new(configure.new_size.1).map_or(PANEL_HEIGHT, NonZeroU32::get);
+        let output_id = self
+            .panels
+            .iter()
+            .find_map(|(id, panel)| (panel.layer == *layer).then_some(*id));
+        let Some(output_id) = output_id else {
+            return;
+        };
 
-        if let Err(error) = self.draw() {
-            eprintln!("ii-shell: panel render failed: {error}");
+        if let Err(error) = self.configure_panel(output_id, configure.new_size) {
+            eprintln!("ii-shell: panel configure failed: {error}");
             self.closed = true;
         }
     }
