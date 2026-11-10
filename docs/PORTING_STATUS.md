@@ -34,12 +34,14 @@ This Rust project replaces the graphical shell/runtime incrementally. It does no
 - [ ] Add partial damage tracking.
 - [ ] Define and test fractional-scale policy; current path uses integer `wl_output` scale factors.
 - [ ] Validate output hotplug, scale changes, suspend/resume and multiple outputs on a real NixOS/Hyprland session.
-- [ ] Input seats, pointer/keyboard focus, shortcut and IPC handling.
+- [x] Track hot-plugged Wayland seats and pointer capability with SCTK `SeatState`; handle per-output pointer events without doing synchronous IPC in the callback.
+- [x] Native workspace input: left-click focuses the selected workspace on the panel's monitor, vertical wheel switches relative workspaces, and the back button toggles the special workspace. Actions use one bounded command worker and a validated batched Hyprland command socket request.
+- [ ] Keyboard focus/shortcuts and right-click overview toggle; the Overview subsystem is not ported yet.
 - [x] Register the Hyprland broadcast socket and Wayland display fd in one blocking poll(2) loop using EventQueue::prepare_read(); drain event batches, coalesce command-socket refreshes, and invalidate output panels only when cached state changes.
 - [x] Reconnect/backoff after Hyprland restarts; initial connection failures and event-stream disconnects retry from 250 ms up to a 30 s cap, with the existing poll loop providing the timer.
 - [ ] Event-loop integration for D-Bus; one shared connection and no worker per feature.
 - [ ] Hot-reload configuration without rebuilding or restarting the shell.
-- [x] Hyprland IPC adapter foundation: typed read-only queries for monitors, workspaces, and active window; bounded response size and socket timeouts.
+- [x] Hyprland IPC adapter: typed read queries for monitors, workspaces, and active window plus validated monitor-scoped workspace dispatch; bounded response sizes and socket timeouts.
 - [x] Pure per-monitor workspace model: active-group calculation, occupied/fake workspace indicators, safe slot lookup, and special-workspace naming, with edge-case tests.
 - [x] Hyprland event-socket foundation: bounded incremental line decoder, typed workspace/window/monitor events, unknown-event preservation, and non-blocking socket drain API.
 - [x] Event-to-state reducer tests for multi-monitor focus, workspace lifecycle, active-window updates, special workspaces, hotplug refreshes, and ignored events.
@@ -51,7 +53,7 @@ This Rust project replaces the graphical shell/runtime incrementally. It does no
 
 Port and test one subsystem at a time:
 
-1. Top bar: per-output surfaces, workspace grouping/occupancy model, and first-pass native workspace indicators are implemented. Each output renders the upstream default of ten 26 px slots, a 22 px active marker, merged occupied pills, and compact occupied/empty dots. Remaining work includes config-driven slot count, rounded/animated rendering, application icons, pointer/keyboard interactions, active-window presentation, clock, system tray, battery, network, volume, media, notifications and resource indicators.
+1. Top bar: per-output surfaces, workspace grouping/occupancy model, native workspace indicators, pointer input, and workspace switching are implemented. Each output renders the upstream default of ten 26 px slots, a 22 px active marker, connected occupied pills, compact occupied/empty dots, and supports left-click focus, vertical relative-workspace switching, and back-button special-workspace toggling. Remaining work includes config-driven slot count, rounded/animated rendering, app icons, keyboard/shortcut handling, right-click overview, active-window presentation, clock, system tray, battery, network, volume, media, notifications and resource indicators.
 2. Quick settings and sidebars: toggles, device status, controls, search and settings launch.
 3. Overview and window management: foreign-toplevel tracking, previews only on demand, workspace movement.
 4. Dock and app launcher: `.desktop` indexing, fuzzy search, activation and pinned apps.
@@ -90,7 +92,10 @@ Hard constraints:
 - Added an allocation-free per-output frame scheduler. Redraw requests coalesce while a frame callback is outstanding and remain pending when no SHM slot is writable; dispatching buffer-release events retries pending paints.
 - Requests wl_surface.frame for each submitted panel commit and schedules a follow-up only when a state/configure invalidation arrived during the prior frame.
 - Hyprland connection is optional at startup. If either socket is unavailable, or the broadcast stream closes, the shell retries with bounded exponential backoff from 250 ms to 30 s. The retry deadline is folded into poll(2)'s timeout, so no timer thread or periodic wakeup is added; successful reconnection takes a fresh snapshot and invalidates all panels.
-- Event batches apply the reducer and run only coalesced pending monitor/workspace/window queries. Those command queries remain synchronous with the existing bounded socket timeout, so moving them off the event-loop critical path remains future work.
+- Event batches apply the reducer and run only coalesced pending monitor/workspace/window queries. Snapshot refresh queries still run synchronously with the existing bounded socket timeout; user-initiated workspace dispatch is isolated on the single bounded command worker.
 - The upstream `HyprlandData.qml` singleton listens to `Hyprland.onRawEvent` and schedules its data refreshes; the Rust adapter preserves the event-driven model while coalescing targeted queries and now reconnecting its socket after compositor restarts.
-- The native top bar now projects the live Hyprland monitor/workspace snapshot into a per-output `WorkspaceModel` and draws the first workspace-strip pass directly into the reusable SHM buffer. The count follows the current upstream `Config.qml` default (10); the active marker, occupied pills, and empty/occupied dots are rendered with tiny-skia. Full user-configurable counts, Toplevel/app-icon mapping, special-workspace presentation, and pointer/keyboard actions remain pending.
+- The native top bar projects the live Hyprland monitor/workspace snapshot into one `WorkspaceModel` per output and draws the workspace strip directly into the reusable SHM buffer. It renders the upstream defaults (10 slots, 26 px spacing, 22 px active marker), occupied pills, and occupied/empty dots.
+- Added SCTK `SeatState` tracking and a pointer handler scoped to each panel surface. Hit testing uses logical surface coordinates, so it does not scale-click incorrectly on high-DPI outputs. Left-click selects the workspace under the pointer; wheel switches relative workspaces; the back button toggles the special workspace. A single bounded command worker performs monitor focus + action as one validated Hyprland batch, keeping synchronous socket I/O out of Wayland callbacks and the display poll loop.
+- Hyprland write IPC is deliberately narrow: no arbitrary raw command strings are exposed; monitor names are character-validated, normal workspace ids must be positive, batch response size is bounded, and non-`ok` replies surface as errors. Worker queue capacity is fixed at eight.
+- Config-driven workspace counts, app icon lookup from biggest-window client state, visual pill rounding/animations, keyboard and shortcut handling, overview/right-click behavior, and real compositor interaction tests remain pending.
 - No real NixOS/Hyprland runtime test or RSS benchmark has been performed.

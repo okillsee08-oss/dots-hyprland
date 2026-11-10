@@ -3,17 +3,22 @@ use std::{
     error::Error,
     io,
     os::fd::{AsFd, AsRawFd},
+    sync::mpsc::{SyncSender, TrySendError, sync_channel},
+    thread::{self, JoinHandle},
     time::Instant,
 };
 
 use ii_shell::{
-    hyprland_state::HyprlandState, output_model::PanelGeometry, render, text,
+    hyprland_ipc::{HyprlandIpc, WorkspaceCommand, WorkspaceDirection},
+    hyprland_state::HyprlandState,
+    output_model::PanelGeometry,
+    render, text,
     workspace_model::WorkspaceModel,
 };
 use smithay_client_toolkit::reexports::client::{
     Connection, QueueHandle,
     globals::registry_queue_init,
-    protocol::{wl_output, wl_shm, wl_surface},
+    protocol::{wl_output, wl_pointer, wl_seat, wl_shm, wl_surface},
 };
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState, FrameCallbackData},
@@ -21,6 +26,10 @@ use smithay_client_toolkit::{
     output::{OutputHandler, OutputInfo, OutputState},
     registry::{ProvidesRegistryState, RegistryState},
     registry_handlers,
+    seat::{
+        pointer::{BTN_BACK, BTN_LEFT, PointerEvent, PointerEventKind, PointerHandler},
+        Capability, SeatHandler, SeatState,
+    },
     shell::{
         WaylandSurface,
         wlr_layer::{
@@ -41,6 +50,56 @@ const BUFFERS_PER_OUTPUT: usize = 2;
 // Matches the upstream Config.qml default; config hot-reload is a later milestone.
 const WORKSPACE_SHOWN_COUNT: usize = 10;
 
+const COMMAND_QUEUE_CAPACITY: usize = 8;
+
+/// One small worker keeps synchronous command-socket I/O out of Wayland
+/// callbacks and the display poll loop. The bounded queue prevents input spam
+/// from creating an unbounded backlog or a thread per panel/widget.
+struct HyprlandCommandWorker {
+    sender: Option<SyncSender<WorkspaceCommand>>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl HyprlandCommandWorker {
+    fn spawn() -> io::Result<Self> {
+        let (sender, receiver) = sync_channel::<WorkspaceCommand>(COMMAND_QUEUE_CAPACITY);
+        let worker = thread::Builder::new()
+            .name("ii-hyprland-command".into())
+            .stack_size(256 * 1024)
+            .spawn(move || run_command_worker(receiver))?;
+        Ok(Self {
+            sender: Some(sender),
+            thread: Some(worker),
+        })
+    }
+
+    fn sender(&self) -> SyncSender<WorkspaceCommand> {
+        self.sender
+            .as_ref()
+            .expect("command worker sender is available while running")
+            .clone()
+    }
+}
+
+impl Drop for HyprlandCommandWorker {
+    fn drop(&mut self) {
+        self.sender.take();
+        if let Some(worker) = self.thread.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
+fn run_command_worker(receiver: std::sync::mpsc::Receiver<WorkspaceCommand>) {
+    while let Ok(command) = receiver.recv() {
+        let result = HyprlandIpc::connect_from_environment()
+            .and_then(|ipc| ipc.dispatch_workspace(&command));
+        if let Err(error) = result {
+            eprintln!("ii-shell: workspace command failed: {error}");
+        }
+    }
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let connection = Connection::connect_to_env()?;
     let (globals, mut event_queue) = registry_queue_init(&connection)?;
@@ -51,8 +110,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     let shm = Shm::bind(&globals, &queue_handle)?;
 
     let pool = SlotPool::new((INITIAL_WIDTH * PANEL_HEIGHT * 4) as usize, &shm)?;
+    let command_worker = HyprlandCommandWorker::spawn()?;
     let mut shell = RustShell {
         registry_state: RegistryState::new(&globals),
+        seat_state: SeatState::new(&globals, &queue_handle),
+        pointers: Vec::new(),
+        command_sender: command_worker.sender(),
         output_state: OutputState::new(&globals, &queue_handle),
         compositor,
         layer_shell,
@@ -230,6 +293,9 @@ struct PanelSurface {
 
 struct RustShell {
     registry_state: RegistryState,
+    seat_state: SeatState,
+    pointers: Vec<(wl_seat::WlSeat, wl_pointer::WlPointer)>,
+    command_sender: SyncSender<WorkspaceCommand>,
     output_state: OutputState,
     compositor: CompositorState,
     layer_shell: LayerShell,
@@ -243,6 +309,29 @@ struct RustShell {
 }
 
 impl RustShell {
+    fn queue_workspace_command(&self, command: WorkspaceCommand) {
+        match self.command_sender.try_send(command) {
+            Ok(()) => {}
+            Err(TrySendError::Full(_)) => {
+                eprintln!("ii-shell: workspace command queue is full; dropping stale input");
+            }
+            Err(TrySendError::Disconnected(_)) => {
+                eprintln!("ii-shell: workspace command worker is unavailable");
+            }
+        }
+    }
+
+    fn release_pointer_for_seat(&mut self, seat: &wl_seat::WlSeat) {
+        while let Some(index) = self
+            .pointers
+            .iter()
+            .position(|(pointer_seat, _)| pointer_seat == seat)
+        {
+            let (_, pointer) = self.pointers.remove(index);
+            pointer.release();
+        }
+    }
+
     fn add_output(
         &mut self,
         qh: &QueueHandle<Self>,
@@ -779,6 +868,116 @@ impl ShmHandler for RustShell {
     }
 }
 
+impl SeatHandler for RustShell {
+    fn seat_state(&mut self) -> &mut SeatState {
+        &mut self.seat_state
+    }
+
+    fn new_seat(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _seat: wl_seat::WlSeat) {}
+
+    fn new_capability(
+        &mut self,
+        _conn: &Connection,
+        qh: &QueueHandle<Self>,
+        seat: wl_seat::WlSeat,
+        capability: Capability,
+    ) {
+        if capability == Capability::Pointer
+            && !self
+                .pointers
+                .iter()
+                .any(|(pointer_seat, _)| pointer_seat == &seat)
+        {
+            match self.seat_state.get_pointer(qh, &seat) {
+                Ok(pointer) => self.pointers.push((seat, pointer)),
+                Err(error) => eprintln!("ii-shell: could not acquire Wayland pointer: {error}"),
+            }
+        }
+    }
+
+    fn remove_capability(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        seat: wl_seat::WlSeat,
+        capability: Capability,
+    ) {
+        if capability == Capability::Pointer {
+            self.release_pointer_for_seat(&seat);
+        }
+    }
+
+    fn remove_seat(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, seat: wl_seat::WlSeat) {
+        self.release_pointer_for_seat(&seat);
+    }
+}
+
+impl PointerHandler for RustShell {
+    fn pointer_frame(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _pointer: &wl_pointer::WlPointer,
+        events: &[PointerEvent],
+    ) {
+        for event in events {
+            let output_id = self.panels.iter().find_map(|(id, panel)| {
+                (panel.layer.wl_surface() == &event.surface).then_some(*id)
+            });
+            let Some(output_id) = output_id else {
+                continue;
+            };
+
+            let action = self.workspace_models.get(&output_id).and_then(|model| {
+                let index = model.workspace_index_at(event.position.0, event.position.1);
+                match &event.kind {
+                    PointerEventKind::Press { button, .. } if *button == BTN_LEFT => {
+                        index.and_then(|index| model.workspace_id_at(index)).map(|workspace_id| {
+                            WorkspaceCommand::Focus {
+                                monitor_name: model.monitor_name.clone(),
+                                workspace_id,
+                            }
+                        })
+                    }
+                    PointerEventKind::Press { button, .. } if *button == BTN_BACK => {
+                        index.map(|_| WorkspaceCommand::ToggleSpecial {
+                            monitor_name: model.monitor_name.clone(),
+                        })
+                    }
+                    PointerEventKind::Axis { vertical, .. } => {
+                        if index.is_none() {
+                            return None;
+                        }
+                        let amount = if vertical.value120 != 0 {
+                            f64::from(vertical.value120)
+                        } else if vertical.discrete != 0 {
+                            f64::from(vertical.discrete)
+                        } else {
+                            vertical.absolute
+                        };
+                        let direction = if amount > 0.0 {
+                            Some(WorkspaceDirection::Next)
+                        } else if amount < 0.0 {
+                            Some(WorkspaceDirection::Previous)
+                        } else {
+                            None
+                        }?;
+                        Some(WorkspaceCommand::Relative {
+                            monitor_name: model.monitor_name.clone(),
+                            direction,
+                        })
+                    }
+                    _ => None,
+                }
+            });
+
+            if let Some(action) = action {
+                self.queue_workspace_command(action);
+            }
+        }
+    }
+}
+
 delegate_registry!(RustShell);
 
 impl ProvidesRegistryState for RustShell {
@@ -786,7 +985,7 @@ impl ProvidesRegistryState for RustShell {
         &mut self.registry_state
     }
 
-    registry_handlers![OutputState];
+    registry_handlers![OutputState, SeatState];
 }
 
 smithay_client_toolkit::delegate_dispatch2!(RustShell);

@@ -4,7 +4,7 @@
 
 1. Preserve the original repository's Hyprland configuration, setup scripts, assets, and license.
 2. Replace the Quickshell UI/runtime with a native Rust Linux desktop shell.
-3. Keep the runtime small and idle-friendly: one Wayland connection, one shared D-Bus session connection, bounded/reused SHM buffers, shared font caches, one panel per output, no per-widget threads, and redraw only when state changes.
+3. Keep the runtime small and idle-friendly: one Wayland connection, one shared D-Bus session connection, bounded/reused SHM buffers, shared font caches, one panel per output, no per-widget threads, one bounded Hyprland command worker, and redraw only when state changes.
 4. Port behavior by subsystem and verify parity before retiring any QML implementation.
 
 ## Runtime layers
@@ -37,8 +37,8 @@ The Hyprland compositor remains responsible for windows and composition. This pr
 - `crates/ii-shell/src/bus.rs`: shared D-Bus session connection boundary.
 - `crates/ii-shell/src/config.rs`: versionable shell settings model.
 - `crates/ii-shell/src/output_model.rs`: checked logical-to-buffer geometry for output-bound panels.
-- `crates/ii-shell/src/hyprland_ipc.rs`: bounded typed Hyprland command-socket queries.
-- `crates/ii-shell/src/workspace_model.rs`: per-monitor workspace grouping and occupancy projection.
+- `crates/ii-shell/src/hyprland_ipc.rs`: bounded typed Hyprland command-socket queries and validated workspace dispatch.
+- `crates/ii-shell/src/workspace_model.rs`: per-monitor workspace grouping, occupancy projection and logical-coordinate pointer hit testing.
 - `crates/ii-shell/src/hyprland_state.rs`: pure event-to-state reducer with targeted refresh hints.
 - `crates/ii-shell/src/hyprland_runtime.rs`: event-batch coordinator and coalesced targeted command-socket refreshes.
 
@@ -53,7 +53,7 @@ cargo test --manifest-path rust/Cargo.toml --workspace
 cargo run --manifest-path rust/Cargo.toml -p ii-shell
 ```
 
-The executable creates one top-panel layer surface per advertised Wayland output. A single poll(2) loop waits on the Wayland display and Hyprland broadcast socket together. It uses EventQueue::prepare_read() before sleeping and dispatches Wayland callbacks after the display fd is readable. Hyprland refreshes are coalesced after event batches. Each panel requests a Wayland frame callback and queues at most one follow-up redraw; a queued paint is retried after frame callbacks and buffer-release dispatches, without a repaint timer. The event stream reconnects after startup failures and disconnects with bounded exponential backoff (250 ms to 30 s), using the existing poll loop rather than a timer thread. Command-socket refreshes are still synchronous and bounded by the IPC adapter timeout; asynchronous refresh I/O remains outstanding. This is an early-stage shell, not a complete desktop replacement.
+The executable creates one top-panel layer surface per advertised Wayland output. A single poll(2) loop waits on the Wayland display and Hyprland broadcast socket together. One bounded worker receives workspace commands from Wayland pointer callbacks and performs short, fresh Hyprland command-socket requests outside the display loop; it is shared by all outputs and never spawned per widget. It uses EventQueue::prepare_read() before sleeping and dispatches Wayland callbacks after the display fd is readable. Hyprland refreshes are coalesced after event batches. Each panel requests a Wayland frame callback and queues at most one follow-up redraw; a queued paint is retried after frame callbacks and buffer-release dispatches, without a repaint timer. The event stream reconnects after startup failures and disconnects with bounded exponential backoff (250 ms to 30 s), using the existing poll loop rather than a timer thread. Command-socket refreshes are still synchronous and bounded by the IPC adapter timeout; asynchronous refresh I/O remains outstanding. This is an early-stage shell, not a complete desktop replacement.
 
 ## Memory rules
 

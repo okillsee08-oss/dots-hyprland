@@ -5,6 +5,10 @@
 
 use crate::hyprland_ipc::{Monitor, Workspace};
 
+pub const WORKSPACE_BUTTON_WIDTH: f64 = 26.0;
+pub const WORKSPACE_LEFT_INSET: f64 = 8.0;
+pub const PANEL_LOGICAL_HEIGHT: f64 = 36.0;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkspaceSlot {
     pub id: i64,
@@ -123,6 +127,22 @@ impl WorkspaceModel {
         self.slots.get(index).map(|slot| slot.id)
     }
 
+    /// Map a Wayland surface-local pointer position to a workspace slot.
+    /// Pointer coordinates are logical surface coordinates, so this remains
+    /// correct when the SHM buffer is scaled for a high-DPI output.
+    pub fn workspace_index_at(&self, x: f64, y: f64) -> Option<usize> {
+        if !x.is_finite()
+            || !y.is_finite()
+            || !(0.0..PANEL_LOGICAL_HEIGHT).contains(&y)
+            || x < WORKSPACE_LEFT_INSET
+        {
+            return None;
+        }
+
+        let index = ((x - WORKSPACE_LEFT_INSET) / WORKSPACE_BUTTON_WIDTH).floor() as usize;
+        (index < self.slots.len()).then_some(index)
+    }
+
     pub fn special_workspace_active(&self) -> bool {
         self.special_workspace_name.is_some()
     }
@@ -218,5 +238,25 @@ mod tests {
             WorkspaceModel::from_monitor(&monitor(1), &[], 0, false),
             Err(WorkspaceModelError::ZeroShownCount)
         );
+    }
+
+    #[test]
+    fn hit_tests_workspace_slots_in_logical_surface_coordinates() {
+        let model = WorkspaceModel::from_monitor(&monitor(1), &[], 3, false).unwrap();
+        assert_eq!(model.workspace_index_at(8.0, 0.0), Some(0));
+        assert_eq!(model.workspace_index_at(33.99, 35.99), Some(0));
+        assert_eq!(model.workspace_index_at(34.0, 18.0), Some(1));
+        assert_eq!(model.workspace_index_at(85.99, 18.0), Some(2));
+        assert_eq!(model.workspace_index_at(86.0, 18.0), None);
+        assert_eq!(model.workspace_index_at(7.99, 18.0), None);
+        assert_eq!(model.workspace_index_at(8.0, 36.0), None);
+        assert_eq!(model.workspace_index_at(8.0, f64::NAN), None);
+        assert_eq!(model.workspace_index_at(f64::INFINITY, 18.0), None);
+    }
+
+    #[test]
+    fn rejects_zero_slots_before_creating_a_hit_area() {
+        let model = WorkspaceModel::from_monitor(&monitor(1), &[], 0, false);
+        assert!(matches!(model, Err(WorkspaceModelError::ZeroShownCount)));
     }
 }

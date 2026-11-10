@@ -1,4 +1,4 @@
-//! Read-only adapter for Hyprland's per-instance command IPC socket.
+//! Bounded adapter for Hyprland's per-instance command IPC socket.
 //!
 //! Queries are bounded and synchronous. Call them from startup or a worker,
 //! never from a Wayland dispatch callback. Event-stream integration and
@@ -15,7 +15,10 @@ use std::{
 use serde::Deserialize;
 
 const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
+const MAX_COMMAND_RESPONSE_BYTES: usize = 16 * 1024;
 const SOCKET_TIMEOUT: Duration = Duration::from_secs(2);
+const COMMAND_TIMEOUT: Duration = Duration::from_millis(500);
+const BATCH_REPLY_DELIMITER: &str = "\n\n\n";
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct WorkspaceRef {
@@ -71,6 +74,76 @@ pub struct Snapshot {
     pub active_window: ActiveWindow,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkspaceDirection {
+    Next,
+    Previous,
+}
+
+/// A narrowly-scoped command emitted by the panel input layer.
+///
+/// Monitor names and workspace ids are validated before becoming IPC text;
+/// this deliberately does not expose an arbitrary command-string API.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WorkspaceCommand {
+    Focus {
+        monitor_name: String,
+        workspace_id: i64,
+    },
+    Relative {
+        monitor_name: String,
+        direction: WorkspaceDirection,
+    },
+    ToggleSpecial {
+        monitor_name: String,
+    },
+}
+
+impl WorkspaceCommand {
+    fn request(&self) -> Result<String, IpcError> {
+        let monitor_name = match self {
+            Self::Focus { monitor_name, .. }
+            | Self::Relative { monitor_name, .. }
+            | Self::ToggleSpecial { monitor_name } => monitor_name,
+        };
+        validate_monitor_name(monitor_name)?;
+
+        let action = match self {
+            Self::Focus { workspace_id, .. } => {
+                if *workspace_id <= 0 {
+                    return Err(IpcError::InvalidWorkspaceId(*workspace_id));
+                }
+                format!("dispatch workspace {workspace_id}")
+            }
+            Self::Relative { direction, .. } => match direction {
+                WorkspaceDirection::Next => "dispatch workspace r+1".to_owned(),
+                WorkspaceDirection::Previous => "dispatch workspace r-1".to_owned(),
+            },
+            Self::ToggleSpecial { .. } => {
+                "dispatch togglespecialworkspace special".to_owned()
+            }
+        };
+
+        // Focus the panel's output before applying the action. This preserves
+        // per-monitor workspace semantics even when a pointer enters a
+        // non-focused output's layer surface.
+        Ok(format!(
+            "[[BATCH]]dispatch focusmonitor {monitor_name};{action}"
+        ))
+    }
+}
+
+fn validate_monitor_name(name: &str) -> Result<(), IpcError> {
+    if name.is_empty()
+        || !name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"-_.:".contains(&byte))
+    {
+        return Err(IpcError::InvalidMonitorName);
+    }
+    Ok(())
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum IpcError {
     #[error("HYPRLAND_INSTANCE_SIGNATURE is not set")]
@@ -85,6 +158,14 @@ pub enum IpcError {
     Json(#[from] serde_json::Error),
     #[error("Hyprland IPC I/O failed: {0}")]
     Io(#[from] std::io::Error),
+    #[error("invalid Hyprland monitor name")]
+    InvalidMonitorName,
+    #[error("invalid normal workspace id: {0}")]
+    InvalidWorkspaceId(i64),
+    #[error("Hyprland command response exceeds 16 KiB")]
+    CommandResponseTooLarge,
+    #[error("Hyprland rejected command: {0}")]
+    CommandRejected(String),
 }
 
 fn default_scale() -> f64 {
@@ -161,6 +242,43 @@ impl HyprlandIpc {
             workspaces: self.workspaces()?,
             active_window: self.active_window()?,
         })
+    }
+
+    /// Dispatch one validated workspace action using a fresh, bounded socket.
+    /// Hyprland evaluates command-socket connections synchronously, so callers
+    /// should use the shell's single command worker rather than a Wayland callback.
+    pub fn dispatch_workspace(&self, command: &WorkspaceCommand) -> Result<(), IpcError> {
+        let request = command.request()?;
+        let mut socket = UnixStream::connect(&self.socket_path)?;
+        socket.set_read_timeout(Some(COMMAND_TIMEOUT))?;
+        socket.set_write_timeout(Some(COMMAND_TIMEOUT))?;
+        socket.write_all(request.as_bytes())?;
+        socket.shutdown(std::net::Shutdown::Write)?;
+
+        let mut response = Vec::with_capacity(128);
+        socket
+            .take((MAX_COMMAND_RESPONSE_BYTES + 1) as u64)
+            .read_to_end(&mut response)?;
+        if response.len() > MAX_COMMAND_RESPONSE_BYTES {
+            return Err(IpcError::CommandResponseTooLarge);
+        }
+
+        let message = String::from_utf8_lossy(&response);
+        let replies = message
+            .split(BATCH_REPLY_DELIMITER)
+            .map(str::trim)
+            .filter(|reply| !reply.is_empty());
+        let mut saw_response = false;
+        for reply in replies {
+            saw_response = true;
+            if reply != "ok" {
+                return Err(IpcError::CommandRejected(reply.to_owned()));
+            }
+        }
+        if !saw_response {
+            return Err(IpcError::CommandRejected("empty response".to_owned()));
+        }
+        Ok(())
     }
 
     fn query_json<T: for<'de> Deserialize<'de>>(&self, request: &str) -> Result<T, IpcError> {
@@ -247,5 +365,126 @@ mod tests {
             Err(IpcError::InvalidInstance)
         ));
         assert!(validate_instance_signature("valid-signature").is_ok());
+    }
+
+    #[test]
+    fn renders_monitor_scoped_workspace_commands_as_a_single_batch() {
+        let focus = WorkspaceCommand::Focus {
+            monitor_name: "eDP-1".into(),
+            workspace_id: 4,
+        };
+        assert_eq!(
+            focus.request().unwrap(),
+            "[[BATCH]]dispatch focusmonitor eDP-1;dispatch workspace 4"
+        );
+
+        let next = WorkspaceCommand::Relative {
+            monitor_name: "DP-2".into(),
+            direction: WorkspaceDirection::Next,
+        };
+        assert_eq!(
+            next.request().unwrap(),
+            "[[BATCH]]dispatch focusmonitor DP-2;dispatch workspace r+1"
+        );
+
+        let special = WorkspaceCommand::ToggleSpecial {
+            monitor_name: "HDMI-A-1".into(),
+        };
+        assert_eq!(
+            special.request().unwrap(),
+            "[[BATCH]]dispatch focusmonitor HDMI-A-1;dispatch togglespecialworkspace special"
+        );
+    }
+
+    #[test]
+    fn validates_monitor_names_and_workspace_ids_before_building_commands() {
+        let invalid_monitor = WorkspaceCommand::ToggleSpecial {
+            monitor_name: "eDP-1;dispatch exit".into(),
+        };
+        assert!(matches!(
+            invalid_monitor.request(),
+            Err(IpcError::InvalidMonitorName)
+        ));
+
+        let invalid_workspace = WorkspaceCommand::Focus {
+            monitor_name: "eDP-1".into(),
+            workspace_id: 0,
+        };
+        assert!(matches!(
+            invalid_workspace.request(),
+            Err(IpcError::InvalidWorkspaceId(0))
+        ));
+    }
+
+    #[test]
+    fn sends_one_bounded_command_request_and_accepts_batch_ok_responses() {
+        use std::{
+            fs,
+            os::unix::net::UnixListener,
+            sync::atomic::{AtomicU64, Ordering},
+            thread,
+        };
+
+        static NEXT_SOCKET: AtomicU64 = AtomicU64::new(0);
+        let id = NEXT_SOCKET.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "ii-shell-hyprland-command-{}-{id}.sock",
+            std::process::id()
+        ));
+        let listener = UnixListener::bind(&path).unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = String::new();
+            stream.read_to_string(&mut request).unwrap();
+            assert_eq!(
+                request,
+                "[[BATCH]]dispatch focusmonitor eDP-1;dispatch workspace 2"
+            );
+            stream.write_all(b"ok\n\n\nok").unwrap();
+        });
+
+        let ipc = HyprlandIpc::from_socket_path(&path);
+        let command = WorkspaceCommand::Focus {
+            monitor_name: "eDP-1".into(),
+            workspace_id: 2,
+        };
+        assert!(ipc.dispatch_workspace(&command).is_ok());
+        server.join().unwrap();
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn reports_hyprland_command_rejections() {
+        use std::{
+            fs,
+            os::unix::net::UnixListener,
+            sync::atomic::{AtomicU64, Ordering},
+            thread,
+        };
+
+        static NEXT_SOCKET: AtomicU64 = AtomicU64::new(0);
+        let id = NEXT_SOCKET.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "ii-shell-hyprland-reject-{}-{id}.sock",
+            std::process::id()
+        ));
+        let listener = UnixListener::bind(&path).unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = String::new();
+            stream.read_to_string(&mut request).unwrap();
+            stream.write_all(b"Invalid dispatcher").unwrap();
+        });
+
+        let ipc = HyprlandIpc::from_socket_path(&path);
+        let command = WorkspaceCommand::ToggleSpecial {
+            monitor_name: "eDP-1".into(),
+        };
+        assert!(matches!(
+            ipc.dispatch_workspace(&command),
+            Err(IpcError::CommandRejected(message)) if message == "Invalid dispatcher"
+        ));
+        server.join().unwrap();
+        fs::remove_file(path).unwrap();
     }
 }
