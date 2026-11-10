@@ -22,8 +22,8 @@ pub fn draw_panel(pixels: &mut [u8], width: u32, height: u32) {
 /// Draws the first native workspace strip for one output.
 ///
 /// The sizing follows upstream Workspaces.qml (26 logical px per slot and a
-/// 22 px active indicator). Application icons and the special-workspace
-/// overlay remain separate follow-up work; empty/occupied slots use dots.
+/// 22 px active indicator). Application icons remain a follow-up; active
+/// special workspaces receive a compact label pill after the normal slots.
 pub fn draw_workspace_strip(
     pixels: &mut [u8],
     width: u32,
@@ -102,6 +102,24 @@ pub fn draw_workspace_strip(
         };
         fill_rect(&mut pixmap, x, y, dot, dot, color);
     }
+
+    if let Some(name) = model.special_workspace_name.as_deref() {
+        let label_width = special_workspace_width(name, scale as u32) as f32;
+        fill_rect(
+            &mut pixmap,
+            origin_x + model.slots.len() as f32 * button,
+            top,
+            label_width,
+            active,
+            Color::from_rgba8(178, 83, 93, 255),
+        );
+    }
+}
+
+/// Approximate label-pill width shared by the raster background and text pass.
+/// Cap the label so a long special-workspace name cannot consume the full bar.
+pub fn special_workspace_width(name: &str, scale: u32) -> u32 {
+    (22 + name.chars().count().min(20) as u32 * 6) * scale
 }
 
 fn fill_rect(pixmap: &mut PixmapMut<'_>, x: f32, y: f32, width: f32, height: f32, color: Color) {
@@ -171,6 +189,46 @@ mod tests {
         assert_eq!(pixel(10, 7), [178, 83, 93, 255]);
         assert_eq!(pixel(63, 8), [67, 63, 64, 255]);
         assert_eq!(pixel(73, 18), [224, 219, 220, 255]);
+    }
+
+    #[test]
+    fn draws_a_label_pill_for_an_active_special_workspace() {
+        let width = 360u32;
+        let height = 36u32;
+        let mut pixels = vec![0; (width * height * 4) as usize];
+        draw_panel(&mut pixels, width, height);
+        let model = WorkspaceModel {
+            monitor_name: "eDP-1".into(),
+            active_workspace_id: 1,
+            group: 0,
+            active_index: 0,
+            fake_workspace_id: -9999,
+            slots: vec![
+                WorkspaceSlot {
+                    id: 1,
+                    occupied: false,
+                    is_fake: false,
+                },
+                WorkspaceSlot {
+                    id: 2,
+                    occupied: false,
+                    is_fake: false,
+                },
+                WorkspaceSlot {
+                    id: 3,
+                    occupied: false,
+                    is_fake: false,
+                },
+            ],
+            special_workspace_name: Some("chat".into()),
+        };
+
+        draw_workspace_strip(&mut pixels, width, height, &model, 1);
+
+        let offset = ((7 * width + 86) * 4) as usize;
+        assert_eq!(&pixels[offset..offset + 4], &[178, 83, 93, 255]);
+        assert_eq!(special_workspace_width("chat", 1), 46);
+        assert_eq!(special_workspace_width("a very long special workspace", 1), 142);
     }
 
     #[test]

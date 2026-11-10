@@ -640,10 +640,33 @@ impl RustShell {
                 );
             }
             let scale = geometry.scale_factor as i32;
+            let special_width = workspace_models
+                .get(&output_id)
+                .and_then(|model| model.special_workspace_name.as_deref())
+                .map_or(0, |name| render::special_workspace_width(name, scale as u32) as i32);
+            if let Some(name) = workspace_models
+                .get(&output_id)
+                .and_then(|model| model.special_workspace_name.as_deref())
+            {
+                let label = name.chars().take(20).collect::<String>();
+                let label_x = workspace_models
+                    .get(&output_id)
+                    .map_or(8, |model| (8 + model.slots.len() as u32 * 26 + 5) as i32)
+                    * scale;
+                text.draw_text(
+                    pixels,
+                    geometry.buffer_width,
+                    geometry.buffer_height,
+                    &label,
+                    (label_x, 5 * scale),
+                    11.0 * scale as f32,
+                );
+            }
             let title_x = workspace_models
                 .get(&output_id)
                 .map_or(20, |model| (8 + model.slots.len() as u32 * 26 + 8) as i32)
-                * scale;
+                * scale
+                + special_width;
             text.draw_text(
                 pixels,
                 geometry.buffer_width,
