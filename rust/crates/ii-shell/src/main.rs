@@ -3,6 +3,7 @@ use std::{
     error::Error,
     io,
     os::fd::{AsFd, AsRawFd},
+    time::Instant,
 };
 
 use ii_shell::{output_model::PanelGeometry, render, text};
@@ -57,14 +58,20 @@ fn main() -> Result<(), Box<dyn Error>> {
         closed: false,
     };
 
+    let mut reconnect = ii_shell::hyprland_runtime::ReconnectBackoff::default();
     let mut hyprland = match ii_shell::hyprland_runtime::HyprlandRuntime::connect_from_environment()
     {
         Ok(runtime) => {
+            reconnect.connected();
             eprintln!("ii-shell: connected to Hyprland event and command sockets");
             Some(runtime)
         }
         Err(error) => {
-            eprintln!("ii-shell: Hyprland IPC unavailable; event updates disabled: {error}");
+            reconnect.schedule_retry(Instant::now());
+            let retry_in_ms = reconnect.poll_timeout_ms(Instant::now());
+            eprintln!(
+                "ii-shell: Hyprland IPC unavailable; retrying in {retry_in_ms} ms: {error}"
+            );
             None
         }
     };
@@ -95,11 +102,16 @@ fn main() -> Result<(), Box<dyn Error>> {
                 revents: 0,
             },
         ];
+        let poll_timeout_ms = if hyprland.is_none() {
+            reconnect.poll_timeout_ms(Instant::now())
+        } else {
+            -1
+        };
         let ready = unsafe {
             libc::poll(
                 descriptors.as_mut_ptr(),
                 descriptors.len() as libc::nfds_t,
-                -1,
+                poll_timeout_ms,
             )
         };
         if ready < 0 {
@@ -152,12 +164,34 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
 
             if stream_closed {
-                eprintln!("ii-shell: Hyprland event stream disconnected; live updates stopped");
                 hyprland = None;
+                reconnect.schedule_retry(Instant::now());
+                let retry_in_ms = reconnect.poll_timeout_ms(Instant::now());
+                eprintln!(
+                    "ii-shell: Hyprland event stream disconnected; reconnecting in {retry_in_ms} ms"
+                );
             }
 
             if state_changed {
                 shell.request_redraw_all(&queue_handle)?;
+            }
+        }
+
+        if hyprland.is_none() && reconnect.is_due(Instant::now()) {
+            match ii_shell::hyprland_runtime::HyprlandRuntime::connect_from_environment() {
+                Ok(runtime) => {
+                    eprintln!("ii-shell: reconnected to Hyprland event and command sockets");
+                    hyprland = Some(runtime);
+                    reconnect.connected();
+                    shell.request_redraw_all(&queue_handle)?;
+                }
+                Err(error) => {
+                    reconnect.schedule_retry(Instant::now());
+                    let retry_in_ms = reconnect.poll_timeout_ms(Instant::now());
+                    eprintln!(
+                        "ii-shell: Hyprland reconnect failed; retrying in {retry_in_ms} ms: {error}"
+                    );
+                }
             }
         }
 
