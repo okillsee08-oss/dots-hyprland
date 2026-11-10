@@ -51,7 +51,7 @@ This Rust project replaces the graphical shell/runtime incrementally. It does no
 
 Port and test one subsystem at a time:
 
-1. Top bar: per-output surfaces and workspace grouping/occupancy data model are implemented; remaining work includes native workspace rendering and interactions, active-window presentation, clock, system tray, battery, network, volume, media, notifications and resource indicators.
+1. Top bar: per-output surfaces, workspace grouping/occupancy model, and first-pass native workspace indicators are implemented. Each output renders the upstream default of ten 26 px slots, a 22 px active marker, merged occupied pills, and compact occupied/empty dots. Remaining work includes config-driven slot count, rounded/animated rendering, application icons, pointer/keyboard interactions, active-window presentation, clock, system tray, battery, network, volume, media, notifications and resource indicators.
 2. Quick settings and sidebars: toggles, device status, controls, search and settings launch.
 3. Overview and window management: foreign-toplevel tracking, previews only on demand, workspace movement.
 4. Dock and app launcher: `.desktop` indexing, fuzzy search, activation and pinned apps.
@@ -92,4 +92,5 @@ Hard constraints:
 - Hyprland connection is optional at startup. If either socket is unavailable, or the broadcast stream closes, the shell retries with bounded exponential backoff from 250 ms to 30 s. The retry deadline is folded into poll(2)'s timeout, so no timer thread or periodic wakeup is added; successful reconnection takes a fresh snapshot and invalidates all panels.
 - Event batches apply the reducer and run only coalesced pending monitor/workspace/window queries. Those command queries remain synchronous with the existing bounded socket timeout, so moving them off the event-loop critical path remains future work.
 - The upstream `HyprlandData.qml` singleton listens to `Hyprland.onRawEvent` and schedules its data refreshes; the Rust adapter preserves the event-driven model while coalescing targeted queries and now reconnecting its socket after compositor restarts.
+- The native top bar now projects the live Hyprland monitor/workspace snapshot into a per-output `WorkspaceModel` and draws the first workspace-strip pass directly into the reusable SHM buffer. The count follows the current upstream `Config.qml` default (10); the active marker, occupied pills, and empty/occupied dots are rendered with tiny-skia. Full user-configurable counts, Toplevel/app-icon mapping, special-workspace presentation, and pointer/keyboard actions remain pending.
 - No real NixOS/Hyprland runtime test or RSS benchmark has been performed.

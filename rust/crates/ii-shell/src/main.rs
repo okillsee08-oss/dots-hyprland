@@ -6,7 +6,12 @@ use std::{
     time::Instant,
 };
 
-use ii_shell::{output_model::PanelGeometry, render, text};
+use ii_shell::{
+    hyprland_state::HyprlandState,
+    output_model::PanelGeometry,
+    render, text,
+    workspace_model::WorkspaceModel,
+};
 use smithay_client_toolkit::reexports::client::{
     Connection, QueueHandle,
     globals::registry_queue_init,
@@ -35,6 +40,8 @@ const PANEL_HEIGHT: u32 = 36;
 const INITIAL_WIDTH: u32 = 1280;
 const PANEL_NAMESPACE: &str = "ii-rust-panel";
 const BUFFERS_PER_OUTPUT: usize = 2;
+// Matches the upstream Config.qml default; config hot-reload is a later milestone.
+const WORKSPACE_SHOWN_COUNT: usize = 10;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let connection = Connection::connect_to_env()?;
@@ -55,6 +62,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         pool,
         text: text::TextEngine::new(),
         panels: HashMap::new(),
+        workspace_models: HashMap::new(),
+        workspace_models_dirty: false,
         closed: false,
     };
 
@@ -77,6 +86,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     eprintln!("ii-shell: waiting for Wayland outputs");
     while !shell.closed {
         event_queue.dispatch_pending(&mut shell)?;
+        if shell.workspace_models_dirty {
+            if let Some(runtime) = hyprland.as_ref() {
+                shell.update_workspace_models(runtime.state());
+                shell.request_redraw_all(&queue_handle)?;
+            }
+        }
         shell.draw_pending_outputs(&queue_handle)?;
 
         event_queue.flush()?;
@@ -163,6 +178,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
             if stream_closed {
                 hyprland = None;
+                shell.clear_workspace_models();
+                shell.request_redraw_all(&queue_handle)?;
                 reconnect.schedule_retry(Instant::now());
                 let retry_in_ms = reconnect.poll_timeout_ms(Instant::now());
                 eprintln!(
@@ -171,6 +188,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
 
             if state_changed {
+                if let Some(runtime) = hyprland.as_ref() {
+                    shell.update_workspace_models(runtime.state());
+                }
                 shell.request_redraw_all(&queue_handle)?;
             }
         }
@@ -179,6 +199,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             match ii_shell::hyprland_runtime::HyprlandRuntime::connect_from_environment() {
                 Ok(runtime) => {
                     eprintln!("ii-shell: reconnected to Hyprland event and command sockets");
+                    shell.update_workspace_models(runtime.state());
                     hyprland = Some(runtime);
                     reconnect.connected();
                     shell.request_redraw_all(&queue_handle)?;
@@ -200,6 +221,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 struct PanelSurface {
     output: wl_output::WlOutput,
+    output_name: String,
     layer: LayerSurface,
     fallback_width: Option<u32>,
     scale_factor: u32,
@@ -217,6 +239,8 @@ struct RustShell {
     pool: SlotPool,
     text: text::TextEngine,
     panels: HashMap<u32, PanelSurface>,
+    workspace_models: HashMap<u32, WorkspaceModel>,
+    workspace_models_dirty: bool,
     closed: bool,
 }
 
@@ -261,6 +285,7 @@ impl RustShell {
             output_id,
             PanelSurface {
                 output,
+                output_name: info.name.clone().unwrap_or_default(),
                 layer,
                 fallback_width,
                 scale_factor,
@@ -269,7 +294,40 @@ impl RustShell {
                 frame_scheduler: ii_shell::frame_scheduler::FrameScheduler::default(),
             },
         );
+        self.workspace_models_dirty = true;
         Ok(())
+    }
+
+    fn update_workspace_models(&mut self, state: &HyprlandState) {
+        self.workspace_models.clear();
+        for (&output_id, panel) in &self.panels {
+            let Some(monitor) = state
+                .monitors
+                .iter()
+                .find(|monitor| monitor.name == panel.output_name)
+            else {
+                continue;
+            };
+            match WorkspaceModel::from_monitor(
+                monitor,
+                &state.workspaces,
+                WORKSPACE_SHOWN_COUNT,
+                false,
+            ) {
+                Ok(model) => {
+                    self.workspace_models.insert(output_id, model);
+                }
+                Err(error) => {
+                    eprintln!("ii-shell: workspace model for {} failed: {error}", panel.output_name);
+                }
+            }
+        }
+        self.workspace_models_dirty = false;
+    }
+
+    fn clear_workspace_models(&mut self) {
+        self.workspace_models.clear();
+        self.workspace_models_dirty = false;
     }
 
     fn update_output_metrics(
@@ -450,7 +508,12 @@ impl RustShell {
         output_id: u32,
         qh: &QueueHandle<Self>,
     ) -> Result<(), Box<dyn Error>> {
-        let (pool, text, panels) = (&mut self.pool, &mut self.text, &mut self.panels);
+        let (pool, text, panels, workspace_models) = (
+            &mut self.pool,
+            &mut self.text,
+            &mut self.panels,
+            &self.workspace_models,
+        );
         let Some(panel) = panels.get_mut(&output_id) else {
             return Ok(());
         };
@@ -476,13 +539,25 @@ impl RustShell {
                 .canvas(pool)
                 .ok_or("SHM buffer became busy before drawing")?;
             render::draw_panel(pixels, geometry.buffer_width, geometry.buffer_height);
+            if let Some(model) = workspace_models.get(&output_id) {
+                render::draw_workspace_strip(
+                    pixels,
+                    geometry.buffer_width,
+                    geometry.buffer_height,
+                    model,
+                    geometry.scale_factor,
+                );
+            }
             let scale = geometry.scale_factor as i32;
+            let title_x = workspace_models.get(&output_id).map_or(20, |model| {
+                (8 + model.slots.len() as u32 * 26 + 8) as i32
+            }) * scale;
             text.draw_text(
                 pixels,
                 geometry.buffer_width,
                 geometry.buffer_height,
                 "illogical impulse · Rust",
-                (20 * scale, 0),
+                (title_x, 0),
                 14.0 * scale as f32,
             );
             for pixel in pixels.chunks_exact_mut(4) {
@@ -652,8 +727,10 @@ impl OutputHandler for RustShell {
         let output_id = self.output_state.info(&output).map(|info| info.id);
         if let Some(output_id) = output_id {
             self.panels.remove(&output_id);
+            self.workspace_models.remove(&output_id);
         } else {
             self.panels.retain(|_, panel| panel.output != output);
+            self.workspace_models.retain(|id, _| self.panels.contains_key(id));
         }
     }
 }
@@ -666,6 +743,7 @@ impl LayerShellHandler for RustShell {
             .find_map(|(id, panel)| (panel.layer == *layer).then_some(*id));
         if let Some(output_id) = output_id {
             self.panels.remove(&output_id);
+            self.workspace_models.remove(&output_id);
         }
     }
 
