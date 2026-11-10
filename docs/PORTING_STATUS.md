@@ -30,11 +30,13 @@ This Rust project replaces the graphical shell/runtime incrementally. It does no
 - [x] Create one output-bound top-panel layer surface per advertised `wl_output`, keyed by the output global id; remove its surface on output destruction.
 - [x] Track output logical width and integer scale-factor changes, with checked logical-to-buffer geometry conversion.
 - [x] Allocate two SHM buffers per output geometry and retain/reuse each `wl_buffer` only after its slot becomes writable following compositor release. Rebuild the bounded pair when geometry changes.
-- [ ] Add frame-callback-driven redraw scheduling when both buffers are busy; add partial damage tracking.
+- [x] Add one outstanding frame callback per output; coalesce invalidations while a frame is in flight and retry queued paints after frame/buffer-release dispatch.
+- [ ] Add partial damage tracking.
 - [ ] Define and test fractional-scale policy; current path uses integer `wl_output` scale factors.
 - [ ] Validate output hotplug, scale changes, suspend/resume and multiple outputs on a real NixOS/Hyprland session.
 - [ ] Input seats, pointer/keyboard focus, shortcut and IPC handling.
-- [ ] Hyprland event socket registration with the main Wayland event loop, reconnect/backoff, and redraw scheduling from state changes.
+- [x] Register the Hyprland broadcast socket and Wayland display fd in one blocking poll(2) loop using EventQueue::prepare_read(); drain event batches, coalesce command-socket refreshes, and invalidate output panels only when cached state changes.
+- [ ] Reconnect/backoff after Hyprland restarts; current behavior logs and disables live IPC after disconnect.
 - [ ] Event-loop integration for D-Bus; one shared connection and no worker per feature.
 - [ ] Hot-reload configuration without rebuilding or restarting the shell.
 - [x] Hyprland IPC adapter foundation: typed read-only queries for monitors, workspaces, and active window; bounded response size and socket timeouts.
@@ -79,3 +81,14 @@ Hard constraints:
 - D-Bus adapters reuse a shared connection and are event-driven.
 - Heavy AI, video, previews, downloads and image operations are lazy/on-demand.
 - Avoid unbounded caches, unbounded history, and unbounded notification queues.
+
+
+## Latest implementation update (2026-11-10)
+
+- Registered the Wayland display and Hyprland broadcast socket in one blocking poll loop. No listener thread or periodic polling timer is created.
+- Uses the synchronized Wayland prepare_read/read/dispatch_pending sequence, avoiding competing reads from the display socket.
+- Added an allocation-free per-output frame scheduler. Redraw requests coalesce while a frame callback is outstanding and remain pending when no SHM slot is writable; dispatching buffer-release events retries pending paints.
+- Requests wl_surface.frame for each submitted panel commit and schedules a follow-up only when a state/configure invalidation arrived during the prior frame.
+- Hyprland connection is optional at startup. A broadcast socket disconnect logs and disables live updates; automatic reconnect remains outstanding.
+- Event batches apply the reducer and run only coalesced pending monitor/workspace/window queries. Those command queries remain synchronous with the existing bounded socket timeout, so moving them off the event-loop critical path remains future work.
+- No real NixOS/Hyprland runtime test or RSS benchmark has been performed.

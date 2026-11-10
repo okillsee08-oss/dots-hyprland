@@ -11,3 +11,4 @@ pub mod hyprland_events;
 pub mod hyprland_state;
 
 pub mod hyprland_runtime;
+pub mod frame_scheduler;
