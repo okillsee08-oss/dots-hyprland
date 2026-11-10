@@ -1,4 +1,4 @@
-use std::{collections::HashMap, error::Error, num::NonZeroU32};
+use std::{collections::HashMap, error::Error};
 
 use ii_shell::{output_model::PanelGeometry, render, text};
 use smithay_client_toolkit::reexports::client::{
