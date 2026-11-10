@@ -421,4 +421,3 @@ mod tests {
         assert_eq!(deadline.duration_since(now), Duration::from_millis(250));
     }
 }
-
