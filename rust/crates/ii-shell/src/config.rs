@@ -36,7 +36,6 @@ impl ShellConfig {
     }
 }
 
-
 /// The workspace-strip settings read from the existing upstream Quickshell
 /// configuration at `~/.config/illogical-impulse/config.json`.
 ///

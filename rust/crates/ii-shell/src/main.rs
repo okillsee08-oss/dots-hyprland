@@ -9,8 +9,8 @@ use std::{
 };
 
 use ii_shell::{
-    hyprland_ipc::{HyprlandIpc, WorkspaceCommand, WorkspaceDirection},
     config::WorkspaceBarConfig,
+    hyprland_ipc::{HyprlandIpc, WorkspaceCommand, WorkspaceDirection},
     hyprland_state::HyprlandState,
     output_model::PanelGeometry,
     render, text,
