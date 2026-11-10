@@ -105,7 +105,10 @@ mod tests {
     #[test]
     fn zero_configure_dimensions_use_output_and_panel_fallbacks() {
         let geometry = PanelGeometry::from_configure((0, 0), Some(3440), 1, 36).unwrap();
-        assert_eq!((geometry.logical_width, geometry.logical_height), (3440, 36));
+        assert_eq!(
+            (geometry.logical_width, geometry.logical_height),
+            (3440, 36)
+        );
     }
 
     #[test]
