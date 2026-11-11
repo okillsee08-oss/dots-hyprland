@@ -40,7 +40,7 @@ This Rust project replaces the graphical shell/runtime incrementally. It does no
 - [x] Register the Hyprland broadcast socket and Wayland display fd in one blocking poll(2) loop using EventQueue::prepare_read(); drain event batches, coalesce command-socket refreshes, and invalidate output panels only when cached state changes.
 - [x] Reconnect/backoff after Hyprland restarts; initial connection failures and event-stream disconnects retry from 250 ms up to a 30 s cap, with the existing poll loop providing the timer.
 - [ ] Event-loop integration for D-Bus; one shared connection and no worker per feature.
-- [ ] Hot-reload configuration without rebuilding or restarting the shell.
+- [x] Hot-reload the upstream workspace-slot setting using a non-blocking inotify directory watch integrated into the existing poll loop; atomic editor replacements and unrelated-file filtering are covered by tests.
 - [x] Hyprland IPC adapter: typed read queries for monitors, workspaces, and active window plus validated monitor-scoped workspace dispatch; bounded response sizes and socket timeouts.
 - [x] Pure per-monitor workspace model: active-group calculation, occupied/fake workspace indicators, safe slot lookup, and special-workspace naming, with edge-case tests.
 - [x] Hyprland event-socket foundation: bounded incremental line decoder, typed workspace/window/monitor events, unknown-event preservation, and non-blocking socket drain API.
@@ -53,7 +53,7 @@ This Rust project replaces the graphical shell/runtime incrementally. It does no
 
 Port and test one subsystem at a time:
 
-1. Top bar: per-output surfaces, workspace grouping/occupancy model, native workspace indicators, pointer input, and workspace switching are implemented. Each output renders the configured number of 26 px slots (default 10), a 22 px active marker, connected occupied pills, compact occupied/empty dots, and a labeled pill for an active special workspace; it supports left-click focus, vertical relative-workspace switching, and back-button special-workspace toggling. Remaining work includes live config hot-reload, rounded/animated rendering, app icons, keyboard/shortcut handling, right-click overview, active-window presentation, clock, system tray, battery, network, volume, media, notifications and resource indicators.
+1. Top bar: per-output surfaces, workspace grouping/occupancy model, native workspace indicators, pointer input, and workspace switching are implemented. Each output renders the configured number of 26 px slots (default 10), a 22 px active marker, connected occupied pills, compact occupied/empty dots, and a labeled pill for an active special workspace; it supports left-click focus, vertical relative-workspace switching, and back-button special-workspace toggling. Remaining work includes rounded/animated rendering, app icons, keyboard/shortcut handling, right-click overview, active-window presentation, clock, system tray, battery, network, volume, media, notifications and resource indicators.
 2. Quick settings and sidebars: toggles, device status, controls, search and settings launch.
 3. Overview and window management: foreign-toplevel tracking, previews only on demand, workspace movement.
 4. Dock and app launcher: `.desktop` indexing, fuzzy search, activation and pinned apps.
@@ -97,6 +97,15 @@ Hard constraints:
 - The native top bar projects the live Hyprland monitor/workspace snapshot into one `WorkspaceModel` per output and draws the workspace strip directly into the reusable SHM buffer. It reads `bar.workspaces.shown` from the existing user config (default 10), uses 26 px spacing with a 22 px active marker, occupied pills, occupied/empty dots, and draws the active special-workspace name in a capped label pill.
 - Added SCTK `SeatState` tracking and a pointer handler scoped to each panel surface. Hit testing uses logical surface coordinates, so it does not scale-click incorrectly on high-DPI outputs. Left-click selects the workspace under the pointer; wheel switches relative workspaces; the back button toggles the special workspace. A single bounded command worker performs monitor focus + action as one validated Hyprland batch, keeping synchronous socket I/O out of Wayland callbacks and the display poll loop.
 - Hyprland write IPC is deliberately narrow: no arbitrary raw command strings are exposed; monitor names are character-validated, normal workspace ids must be positive, batch response size is bounded, and non-`ok` replies surface as errors. Worker queue capacity is fixed at eight.
-- The workspace slot count now reads the user's existing `~/.config/illogical-impulse/config.json` field `bar.workspaces.shown`; absent or invalid files/values safely fall back to the upstream default of 10. The file is read-only from the Rust port; live config watching and hot reload remain pending.
+- The workspace slot count reads the user's existing `~/.config/illogical-impulse/config.json` field `bar.workspaces.shown`; absent or invalid files/values safely fall back to the upstream default of 10. The file remains read-only. An inotify watch on its parent directory now detects in-place writes and atomic rename-based saves; relevant events trigger a bounded config reread, model rebuild and redraw without adding a thread or timer.
 - App icon lookup from biggest-window client state, visual pill rounding/animations, keyboard and shortcut handling, overview/right-click behavior, and real compositor interaction tests remain pending.
 - No real NixOS/Hyprland runtime test or RSS benchmark has been performed.
+
+
+## Latest implementation update (2026-11-11)
+
+- Added a non-blocking inotify watcher for the parent directory of the existing Illogical Impulse config file. It detects writes, creates, deletes and atomic rename-based editor saves for `config.json`, ignores unrelated file events, and treats inotify queue overflow as a reason to reload.
+- Registered the watcher fd beside Wayland and Hyprland in the existing blocking `poll(2)` loop. No timer, watcher thread, config rewrite or periodic filesystem polling was added.
+- On a relevant event, the shell rereads only the existing `bar.workspaces.shown` setting, validates it through the existing bounded parser, rebuilds per-output workspace models and redraws panels only when the effective count changes.
+- Added tests for in-place writes, atomic file replacement, unrelated-file filtering and a missing config directory. These tests still need the branch CI result; they do not substitute for a live compositor test.
+- The watch is armed only when the config's parent directory already exists at startup. Creating that directory later requires restarting the shell; once the directory exists, creating or replacing `config.json` is detected.
