@@ -116,7 +116,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut config_watcher = match workspace_config_path() {
         Some(path) => match WorkspaceConfigWatcher::new(&path) {
             Ok(Some(watcher)) => {
-                eprintln!("ii-shell: watching {} for workspace bar changes", path.display());
+                eprintln!(
+                    "ii-shell: watching {} for workspace bar changes",
+                    path.display()
+                );
                 Some(watcher)
             }
             Ok(None) => {
@@ -1070,7 +1073,6 @@ impl ProvidesRegistryState for RustShell {
 
 smithay_client_toolkit::delegate_dispatch2!(RustShell);
 
-
 /// Resolve the existing Illogical Impulse config path without creating or
 /// modifying any user-owned directories or files.
 fn workspace_config_path() -> Option<PathBuf> {
@@ -1185,7 +1187,7 @@ impl WorkspaceConfigWatcher {
                         .split(|byte| *byte == 0)
                         .next()
                         .unwrap_or(padded_name);
-                    if name == self.target_name {
+                    if name == self.target_name.as_slice() {
                         changed = true;
                     }
                 }
