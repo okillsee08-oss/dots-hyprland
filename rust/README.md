@@ -35,7 +35,7 @@ The Hyprland compositor remains responsible for windows and composition. This pr
 - `crates/ii-shell/src/render.rs`: software rendering primitives.
 - `crates/ii-shell/src/text.rs`: a shared cosmic-text font system and glyph cache.
 - `crates/ii-shell/src/bus.rs`: shared D-Bus session connection boundary.
-- `crates/ii-shell/src/config.rs`: versionable shell settings model and read-only parsing of the upstream `bar.workspaces.shown` option from `~/.config/illogical-impulse/config.json` (hot reload remains pending).
+- `crates/ii-shell/src/config.rs`: versionable shell settings model and read-only parsing of the upstream `bar.workspaces.shown` option from `~/.config/illogical-impulse/config.json`; `ii-shell` watches that file's parent directory with inotify and reloads the workspace count through its existing poll loop.
 - `crates/ii-shell/src/output_model.rs`: checked logical-to-buffer geometry for output-bound panels.
 - `crates/ii-shell/src/hyprland_ipc.rs`: bounded typed Hyprland command-socket queries and validated workspace dispatch.
 - `crates/ii-shell/src/workspace_model.rs`: per-monitor workspace grouping, occupancy projection and logical-coordinate pointer hit testing.
