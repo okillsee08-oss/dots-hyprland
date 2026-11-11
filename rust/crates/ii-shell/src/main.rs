@@ -1,8 +1,11 @@
 use std::{
     collections::HashMap,
     error::Error,
+    ffi::CString,
     io,
-    os::fd::{AsFd, AsRawFd},
+    os::fd::{AsFd, AsRawFd, FromRawFd, OwnedFd},
+    os::unix::ffi::OsStrExt,
+    path::{Path, PathBuf},
     sync::mpsc::{SyncSender, TrySendError, sync_channel},
     thread::{self, JoinHandle},
     time::Instant,
@@ -110,6 +113,23 @@ fn main() -> Result<(), Box<dyn Error>> {
     let pool = SlotPool::new((INITIAL_WIDTH * PANEL_HEIGHT * 4) as usize, &shm)?;
     let command_worker = HyprlandCommandWorker::spawn()?;
     let workspace_shown_count = WorkspaceBarConfig::load().shown;
+    let mut config_watcher = match workspace_config_path() {
+        Some(path) => match WorkspaceConfigWatcher::new(&path) {
+            Ok(Some(watcher)) => {
+                eprintln!("ii-shell: watching {} for workspace bar changes", path.display());
+                Some(watcher)
+            }
+            Ok(None) => {
+                eprintln!("ii-shell: config directory is not present; live reload is unavailable");
+                None
+            }
+            Err(error) => {
+                eprintln!("ii-shell: could not watch workspace config: {error}");
+                None
+            }
+        },
+        None => None,
+    };
     let mut shell = RustShell {
         registry_state: RegistryState::new(&globals),
         seat_state: SeatState::new(&globals, &queue_handle),
@@ -172,6 +192,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             },
             libc::pollfd {
                 fd: hyprland.as_ref().map_or(-1, |runtime| runtime.event_fd()),
+                events: libc::POLLIN,
+                revents: 0,
+            },
+            libc::pollfd {
+                fd: config_watcher.as_ref().map_or(-1, |watcher| watcher.as_raw_fd()),
                 events: libc::POLLIN,
                 revents: 0,
             },
@@ -253,6 +278,39 @@ fn main() -> Result<(), Box<dyn Error>> {
                     shell.update_workspace_models(runtime.state());
                 }
                 shell.request_redraw_all(&queue_handle)?;
+            }
+        }
+
+        let config_ready =
+            descriptors[2].revents & (libc::POLLIN | libc::POLLERR | libc::POLLHUP) != 0;
+        if config_ready {
+            let mut reload_config = false;
+            let mut watcher_failed = false;
+            if let Some(watcher) = config_watcher.as_ref() {
+                match watcher.drain_changes() {
+                    Ok(changed) => reload_config = changed,
+                    Err(error) => {
+                        eprintln!("ii-shell: workspace config watch failed: {error}");
+                        watcher_failed = true;
+                    }
+                }
+            }
+            if watcher_failed {
+                config_watcher = None;
+            }
+            if reload_config {
+                let next_count = WorkspaceBarConfig::load().shown;
+                if next_count != shell.workspace_shown_count {
+                    eprintln!(
+                        "ii-shell: workspace slot count changed from {} to {}",
+                        shell.workspace_shown_count, next_count
+                    );
+                    shell.workspace_shown_count = next_count;
+                    if let Some(runtime) = hyprland.as_ref() {
+                        shell.update_workspace_models(runtime.state());
+                    }
+                    shell.request_redraw_all(&queue_handle)?;
+                }
             }
         }
 
@@ -1011,3 +1069,195 @@ impl ProvidesRegistryState for RustShell {
 }
 
 smithay_client_toolkit::delegate_dispatch2!(RustShell);
+
+
+/// Resolve the existing Illogical Impulse config path without creating or
+/// modifying any user-owned directories or files.
+fn workspace_config_path() -> Option<PathBuf> {
+    let config_home = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))?;
+    Some(config_home.join("illogical-impulse/config.json"))
+}
+
+/// Event-driven watcher for the parent directory of the upstream config.
+/// Watching the directory (rather than the file inode) also catches atomic
+/// editor saves that replace config.json with a rename.
+struct WorkspaceConfigWatcher {
+    fd: OwnedFd,
+    watch_descriptor: i32,
+    target_name: Vec<u8>,
+}
+
+impl WorkspaceConfigWatcher {
+    fn new(path: &Path) -> io::Result<Option<Self>> {
+        let Some(parent) = path.parent() else {
+            return Ok(None);
+        };
+        let Some(file_name) = path.file_name() else {
+            return Ok(None);
+        };
+        if !parent.is_dir() {
+            return Ok(None);
+        }
+
+        let directory = CString::new(parent.as_os_str().as_bytes())
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "config path contains NUL"))?;
+        let raw_fd = unsafe { libc::inotify_init1(libc::IN_CLOEXEC | libc::IN_NONBLOCK) };
+        if raw_fd < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let fd = unsafe { OwnedFd::from_raw_fd(raw_fd) };
+        let mask = libc::IN_CLOSE_WRITE
+            | libc::IN_MOVED_TO
+            | libc::IN_CREATE
+            | libc::IN_DELETE
+            | libc::IN_ATTRIB
+            | libc::IN_MOVED_FROM;
+        let watch_descriptor =
+            unsafe { libc::inotify_add_watch(fd.as_raw_fd(), directory.as_ptr(), mask) };
+        if watch_descriptor < 0 {
+            return Err(io::Error::last_os_error());
+        }
+
+        Ok(Some(Self {
+            fd,
+            watch_descriptor,
+            target_name: file_name.as_bytes().to_vec(),
+        }))
+    }
+
+    fn as_raw_fd(&self) -> i32 {
+        self.fd.as_raw_fd()
+    }
+
+    /// Drain all queued directory notifications. A config change is reported
+    /// only for config.json (or an inotify overflow), not unrelated files.
+    fn drain_changes(&self) -> io::Result<bool> {
+        let mut changed = false;
+        let mut buffer = [0_u8; 4096];
+        let header_size = std::mem::size_of::<libc::inotify_event>();
+
+        loop {
+            let read = unsafe {
+                libc::read(
+                    self.fd.as_raw_fd(),
+                    buffer.as_mut_ptr().cast(),
+                    buffer.len(),
+                )
+            };
+            if read < 0 {
+                let error = io::Error::last_os_error();
+                if error.kind() == io::ErrorKind::WouldBlock {
+                    break;
+                }
+                if error.kind() == io::ErrorKind::Interrupted {
+                    continue;
+                }
+                return Err(error);
+            }
+            if read == 0 {
+                break;
+            }
+
+            let bytes_read = read as usize;
+            let mut offset = 0;
+            while offset + header_size <= bytes_read {
+                let event = unsafe {
+                    std::ptr::read_unaligned(
+                        buffer.as_ptr().add(offset).cast::<libc::inotify_event>(),
+                    )
+                };
+                let name_start = offset + header_size;
+                let name_end = name_start.saturating_add(event.len as usize);
+                if name_end > bytes_read {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "truncated inotify event",
+                    ));
+                }
+
+                if event.mask & libc::IN_Q_OVERFLOW != 0 {
+                    changed = true;
+                } else if event.wd == self.watch_descriptor && event.len > 0 {
+                    let padded_name = &buffer[name_start..name_end];
+                    let name = padded_name
+                        .split(|byte| *byte == 0)
+                        .next()
+                        .unwrap_or(padded_name);
+                    if name == self.target_name {
+                        changed = true;
+                    }
+                }
+                offset = name_end;
+            }
+        }
+
+        Ok(changed)
+    }
+}
+
+#[cfg(test)]
+mod workspace_config_watcher_tests {
+    use super::*;
+    use std::{
+        fs,
+        sync::atomic::{AtomicU64, Ordering},
+    };
+
+    static NEXT_DIR: AtomicU64 = AtomicU64::new(0);
+
+    fn temp_dir() -> PathBuf {
+        let id = NEXT_DIR.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "ii-shell-config-watch-{}-{id}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    #[test]
+    fn watches_in_place_writes_and_atomic_editor_replacements() {
+        let directory = temp_dir();
+        let config = directory.join("config.json");
+        fs::write(&config, br#"{"bar":{"workspaces":{"shown":8}}}"#).unwrap();
+        let watcher = WorkspaceConfigWatcher::new(&config)
+            .unwrap()
+            .expect("existing parent directory should be watched");
+
+        fs::write(&config, br#"{"bar":{"workspaces":{"shown":6}}}"#).unwrap();
+        assert!(watcher.drain_changes().unwrap());
+        assert!(!watcher.drain_changes().unwrap());
+
+        let replacement = directory.join(".config.json.tmp");
+        fs::write(&replacement, br#"{"bar":{"workspaces":{"shown":4}}}"#).unwrap();
+        fs::rename(&replacement, &config).unwrap();
+        assert!(watcher.drain_changes().unwrap());
+
+        drop(watcher);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn ignores_changes_to_unrelated_files() {
+        let directory = temp_dir();
+        let config = directory.join("config.json");
+        fs::write(&config, b"{}").unwrap();
+        let watcher = WorkspaceConfigWatcher::new(&config).unwrap().unwrap();
+
+        fs::write(directory.join("theme.json"), b"{}").unwrap();
+        assert!(!watcher.drain_changes().unwrap());
+
+        drop(watcher);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn missing_config_directory_is_a_non_fatal_no_watch_result() {
+        let directory = temp_dir();
+        fs::remove_dir(&directory).unwrap();
+        let config = directory.join("illogical-impulse/config.json");
+        assert!(WorkspaceConfigWatcher::new(&config).unwrap().is_none());
+    }
+}
