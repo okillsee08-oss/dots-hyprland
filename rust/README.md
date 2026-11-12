@@ -70,3 +70,12 @@ The executable creates one top-panel layer surface per advertised Wayland output
 ## Porting rule
 
 Existing QML remains the behavioral reference until the corresponding native subsystem has functional tests and an explicit acceptance checklist. See [PORTING_STATUS.md](../docs/PORTING_STATUS.md).
+
+
+## Config reload behavior
+
+The workspace-slot watcher observes the existing `~/.config/illogical-impulse`
+directory with inotify and is registered in the same blocking event loop as
+Wayland and Hyprland. It reloads only `bar.workspaces.shown`; the upstream
+configuration remains read-only. The parent directory must exist when the
+shell starts. If it is created later, restart the shell to arm the watch.
