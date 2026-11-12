@@ -199,7 +199,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                 revents: 0,
             },
             libc::pollfd {
-                fd: config_watcher.as_ref().map_or(-1, |watcher| watcher.as_raw_fd()),
+                fd: config_watcher
+                    .as_ref()
+                    .map_or(-1, |watcher| watcher.as_raw_fd()),
                 events: libc::POLLIN,
                 revents: 0,
             },
@@ -1211,10 +1213,8 @@ mod workspace_config_watcher_tests {
 
     fn temp_dir() -> PathBuf {
         let id = NEXT_DIR.fetch_add(1, Ordering::Relaxed);
-        let path = std::env::temp_dir().join(format!(
-            "ii-shell-config-watch-{}-{id}",
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("ii-shell-config-watch-{}-{id}", std::process::id()));
         fs::create_dir_all(&path).unwrap();
         path
     }
