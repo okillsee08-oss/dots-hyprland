@@ -3,7 +3,7 @@
 **Branch:** `rust-port/phase-0`  
 **Upstream:** `end-4/dots-hyprland`  
 **Reference revision at port start:** `2f2a376fdb2ad738bf55f693dd0b474b64bb0ab8`  
-**Latest upstream inspected (2026-11-10):** `cb1c428bf841dabccff1b126904047c28e89ba8c`
+**Latest upstream inspected (2026-11-12):** `cb1c428bf841dabccff1b126904047c28e89ba8c`
 
 ## What is being ported
 
@@ -109,3 +109,13 @@ Hard constraints:
 - On a relevant event, the shell rereads only the existing `bar.workspaces.shown` setting, validates it through the existing bounded parser, rebuilds per-output workspace models and redraws panels only when the effective count changes.
 - Added tests for in-place writes, atomic file replacement, unrelated-file filtering and a missing config directory. These tests still need the branch CI result; they do not substitute for a live compositor test.
 - The watch is armed only when the config's parent directory already exists at startup. Creating that directory later requires restarting the shell; once the directory exists, creating or replacing `config.json` is detected.
+
+
+## Latest review and verification update (2026-11-12)
+
+- Rechecked the fork branch head before editing: `2fc030223bb3f8c759425829d48f09756baaba78`.
+- Rechecked upstream `main`: latest commit remains `cb1c428bf841dabccff1b126904047c28e89ba8c` (2026-11-08). Reviewed the upstream `Workspaces.qml`, `WorkspaceModel.qml`, and `HyprlandData.qml` implementations at that revision. The QML reference still includes app-icon selection from the biggest workspace window, right-click overview toggling, Super-key press behavior, and richer visual transitions; these remain parity work, not silently assumed to be ported.
+- GitHub Actions run #47 for branch head `2fc030223bb3f8c759425829d48f09756baaba78` failed at the `Format` step only. Its log identified two rustfmt layout differences in `main.rs`; compilation, tests and Clippy were skipped by the workflow after that failure.
+- Corrected those two formatting differences in `main.rs` and pushed the fix. The replacement commit's Actions run must complete before the build/test/Clippy state can be reported as green.
+- Documented the config watcher's startup requirement: the parent directory must exist when the process starts; creating it later requires a restart. No config files are modified by the shell.
+- No local Rust toolchain, NixOS/Hyprland compositor session, or runtime RSS measurement was available in this run. Do not treat the QML review or source-level changes as runtime validation.
