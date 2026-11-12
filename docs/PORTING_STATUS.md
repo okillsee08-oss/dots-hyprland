@@ -116,6 +116,9 @@ Hard constraints:
 - Rechecked the fork branch head before editing: `2fc030223bb3f8c759425829d48f09756baaba78`.
 - Rechecked upstream `main`: latest commit remains `cb1c428bf841dabccff1b126904047c28e89ba8c` (2026-11-08). Reviewed the upstream `Workspaces.qml`, `WorkspaceModel.qml`, and `HyprlandData.qml` implementations at that revision. The QML reference still includes app-icon selection from the biggest workspace window, right-click overview toggling, Super-key press behavior, and richer visual transitions; these remain parity work, not silently assumed to be ported.
 - GitHub Actions run #47 for branch head `2fc030223bb3f8c759425829d48f09756baaba78` failed at the `Format` step only. Its log identified two rustfmt layout differences in `main.rs`; compilation, tests and Clippy were skipped by the workflow after that failure.
-- Corrected those two formatting differences in `main.rs` and pushed the fix. The replacement commit's Actions run must complete before the build/test/Clippy state can be reported as green.
+- Corrected those two formatting differences in `main.rs` and pushed the fix. GitHub Actions run #48 for `e17ddd713c4a3a9bb5d0379c5652c61293b9deb5` and run #49 for `0ea631426d36e73810c52f3dc6c889069f113197` both completed successfully: Format, Check, Test and Clippy all passed. The test job reported 56 workspace tests plus 3 inotify watcher tests passing (59 total).
 - Documented the config watcher's startup requirement: the parent directory must exist when the process starts; creating it later requires a restart. No config files are modified by the shell.
 - No local Rust toolchain, NixOS/Hyprland compositor session, or runtime RSS measurement was available in this run. Do not treat the QML review or source-level changes as runtime validation.
+
+
+- Final CI verification for this run: [Actions run #48](https://github.com/okillsee08-oss/dots-hyprland/actions/runs/43241104361) and [Actions run #49](https://github.com/okillsee08-oss/dots-hyprland/actions/runs/43241163003) are both green. Run #49 includes the README update and the same Rust source as the formatting-fix commit.
