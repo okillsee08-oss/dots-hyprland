@@ -99,10 +99,7 @@ impl ClockState {
 }
 
 fn next_boundary(now: SystemTime, precision: ClockPrecision) -> SystemTime {
-    let seconds = now
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
+    let seconds = now.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
     let interval = precision.interval_seconds();
     let next = seconds
         .saturating_sub(seconds % interval)
@@ -154,7 +151,14 @@ fn format_parts(local: &libc::tm, precision: ClockPrecision) -> Option<ClockText
 mod tests {
     use super::*;
 
-    fn local_time(hour: i32, minute: i32, second: i32, weekday: i32, day: i32, month: i32) -> libc::tm {
+    fn local_time(
+        hour: i32,
+        minute: i32,
+        second: i32,
+        weekday: i32,
+        day: i32,
+        month: i32,
+    ) -> libc::tm {
         let mut value: libc::tm = unsafe { std::mem::zeroed() };
         value.tm_hour = hour;
         value.tm_min = minute;
