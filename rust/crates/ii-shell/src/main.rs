@@ -8,10 +8,11 @@ use std::{
     path::{Path, PathBuf},
     sync::mpsc::{SyncSender, TrySendError, sync_channel},
     thread::{self, JoinHandle},
-    time::Instant,
+    time::{Instant, SystemTime},
 };
 
 use ii_shell::{
+    clock::ClockState,
     config::WorkspaceBarConfig,
     hyprland_ipc::{HyprlandIpc, WorkspaceCommand, WorkspaceDirection},
     hyprland_state::HyprlandState,
@@ -144,6 +145,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         shm,
         pool,
         text: text::TextEngine::new(),
+        clock: ClockState::new(SystemTime::now()),
         panels: HashMap::new(),
         workspace_models: HashMap::new(),
         workspace_shown_count,
@@ -170,6 +172,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     eprintln!("ii-shell: waiting for Wayland outputs");
     while !shell.closed {
         event_queue.dispatch_pending(&mut shell)?;
+        if shell.clock.refresh(SystemTime::now()) {
+            shell.request_redraw_all(&queue_handle)?;
+        }
         if shell.workspace_models_dirty {
             if let Some(runtime) = hyprland.as_ref() {
                 shell.update_workspace_models(runtime.state());
@@ -206,10 +211,16 @@ fn main() -> Result<(), Box<dyn Error>> {
                 revents: 0,
             },
         ];
-        let poll_timeout_ms = if hyprland.is_none() {
+        let reconnect_timeout_ms = if hyprland.is_none() {
             reconnect.poll_timeout_ms(Instant::now())
         } else {
             -1
+        };
+        let clock_timeout_ms = shell.clock.poll_timeout_ms(SystemTime::now());
+        let poll_timeout_ms = if reconnect_timeout_ms < 0 {
+            clock_timeout_ms
+        } else {
+            reconnect_timeout_ms.min(clock_timeout_ms)
         };
         let ready = unsafe {
             libc::poll(
@@ -365,6 +376,7 @@ struct RustShell {
     shm: Shm,
     pool: SlotPool,
     text: text::TextEngine,
+    clock: ClockState,
     panels: HashMap<u32, PanelSurface>,
     workspace_models: HashMap<u32, WorkspaceModel>,
     workspace_shown_count: usize,
@@ -397,8 +409,7 @@ impl RustShell {
     }
 
     fn add_output(
-        &mut self,
-        qh: &QueueHandle<Self>,
+        &mut self,        qh: &QueueHandle<Self>,
         output: wl_output::WlOutput,
         info: OutputInfo,
     ) -> Result<(), Box<dyn Error>> {
@@ -662,11 +673,12 @@ impl RustShell {
         output_id: u32,
         qh: &QueueHandle<Self>,
     ) -> Result<(), Box<dyn Error>> {
-        let (pool, text, panels, workspace_models) = (
+        let (pool, text, panels, workspace_models, clock) = (
             &mut self.pool,
             &mut self.text,
             &mut self.panels,
             &self.workspace_models,
+            &self.clock,
         );
         let Some(panel) = panels.get_mut(&output_id) else {
             return Ok(());
@@ -732,12 +744,33 @@ impl RustShell {
                 .map_or(20, |model| (8 + model.slots.len() as u32 * 26 + 8) as i32)
                 * scale
                 + special_width;
+            let clock_label = &clock.text().time;
+            let clock_width = (clock_label.chars().count() as u32)
+                .saturating_mul(8)
+                .saturating_mul(scale as u32);
+            let clock_padding = 10u32.saturating_mul(scale as u32);
+            let clock_x = i32::try_from(
+                geometry
+                    .buffer_width
+                    .saturating_sub(clock_width.saturating_add(clock_padding)),
+            )
+            .unwrap_or(i32::MAX);
+            if title_x.saturating_add(160 * scale) < clock_x {
+                text.draw_text(
+                    pixels,
+                    geometry.buffer_width,
+                    geometry.buffer_height,
+                    "illogical impulse · Rust",
+                    (title_x, 0),
+                    14.0 * scale as f32,
+                );
+            }
             text.draw_text(
                 pixels,
                 geometry.buffer_width,
                 geometry.buffer_height,
-                "illogical impulse · Rust",
-                (title_x, 0),
+                clock_label,
+                (clock_x, 5 * scale),
                 14.0 * scale as f32,
             );
             for pixel in pixels.chunks_exact_mut(4) {
@@ -797,8 +830,7 @@ impl CompositorHandler for RustShell {
             .find_map(|(id, panel)| (panel.layer.wl_surface() == surface).then_some(*id));
         if let Some(output_id) = output_id {
             if let Err(error) = self.update_panel_scale(qh, output_id, new_factor) {
-                eprintln!("ii-shell: output scale update failed: {error}");
-                self.closed = true;
+                eprintln!("ii-shell: output scale update failed: {error}");                self.closed = true;
             }
         }
     }
@@ -1098,168 +1130,3 @@ impl WorkspaceConfigWatcher {
         let Some(parent) = path.parent() else {
             return Ok(None);
         };
-        let Some(file_name) = path.file_name() else {
-            return Ok(None);
-        };
-        if !parent.is_dir() {
-            return Ok(None);
-        }
-
-        let directory = CString::new(parent.as_os_str().as_bytes())
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "config path contains NUL"))?;
-        let raw_fd = unsafe { libc::inotify_init1(libc::IN_CLOEXEC | libc::IN_NONBLOCK) };
-        if raw_fd < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        let fd = unsafe { OwnedFd::from_raw_fd(raw_fd) };
-        let mask = libc::IN_CLOSE_WRITE
-            | libc::IN_MOVED_TO
-            | libc::IN_CREATE
-            | libc::IN_DELETE
-            | libc::IN_ATTRIB
-            | libc::IN_MOVED_FROM;
-        let watch_descriptor =
-            unsafe { libc::inotify_add_watch(fd.as_raw_fd(), directory.as_ptr(), mask) };
-        if watch_descriptor < 0 {
-            return Err(io::Error::last_os_error());
-        }
-
-        Ok(Some(Self {
-            fd,
-            watch_descriptor,
-            target_name: file_name.as_bytes().to_vec(),
-        }))
-    }
-
-    fn as_raw_fd(&self) -> i32 {
-        self.fd.as_raw_fd()
-    }
-
-    /// Drain all queued directory notifications. A config change is reported
-    /// only for config.json (or an inotify overflow), not unrelated files.
-    fn drain_changes(&self) -> io::Result<bool> {
-        let mut changed = false;
-        let mut buffer = [0_u8; 4096];
-        let header_size = std::mem::size_of::<libc::inotify_event>();
-
-        loop {
-            let read = unsafe {
-                libc::read(
-                    self.fd.as_raw_fd(),
-                    buffer.as_mut_ptr().cast(),
-                    buffer.len(),
-                )
-            };
-            if read < 0 {
-                let error = io::Error::last_os_error();
-                if error.kind() == io::ErrorKind::WouldBlock {
-                    break;
-                }
-                if error.kind() == io::ErrorKind::Interrupted {
-                    continue;
-                }
-                return Err(error);
-            }
-            if read == 0 {
-                break;
-            }
-
-            let bytes_read = read as usize;
-            let mut offset = 0;
-            while offset + header_size <= bytes_read {
-                let event = unsafe {
-                    std::ptr::read_unaligned(
-                        buffer.as_ptr().add(offset).cast::<libc::inotify_event>(),
-                    )
-                };
-                let name_start = offset + header_size;
-                let name_end = name_start.saturating_add(event.len as usize);
-                if name_end > bytes_read {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "truncated inotify event",
-                    ));
-                }
-
-                if event.mask & libc::IN_Q_OVERFLOW != 0 {
-                    changed = true;
-                } else if event.wd == self.watch_descriptor && event.len > 0 {
-                    let padded_name = &buffer[name_start..name_end];
-                    let name = padded_name
-                        .split(|byte| *byte == 0)
-                        .next()
-                        .unwrap_or(padded_name);
-                    if name == self.target_name.as_slice() {
-                        changed = true;
-                    }
-                }
-                offset = name_end;
-            }
-        }
-
-        Ok(changed)
-    }
-}
-
-#[cfg(test)]
-mod workspace_config_watcher_tests {
-    use super::*;
-    use std::{
-        fs,
-        sync::atomic::{AtomicU64, Ordering},
-    };
-
-    static NEXT_DIR: AtomicU64 = AtomicU64::new(0);
-
-    fn temp_dir() -> PathBuf {
-        let id = NEXT_DIR.fetch_add(1, Ordering::Relaxed);
-        let path =
-            std::env::temp_dir().join(format!("ii-shell-config-watch-{}-{id}", std::process::id()));
-        fs::create_dir_all(&path).unwrap();
-        path
-    }
-
-    #[test]
-    fn watches_in_place_writes_and_atomic_editor_replacements() {
-        let directory = temp_dir();
-        let config = directory.join("config.json");
-        fs::write(&config, br#"{"bar":{"workspaces":{"shown":8}}}"#).unwrap();
-        let watcher = WorkspaceConfigWatcher::new(&config)
-            .unwrap()
-            .expect("existing parent directory should be watched");
-
-        fs::write(&config, br#"{"bar":{"workspaces":{"shown":6}}}"#).unwrap();
-        assert!(watcher.drain_changes().unwrap());
-        assert!(!watcher.drain_changes().unwrap());
-
-        let replacement = directory.join(".config.json.tmp");
-        fs::write(&replacement, br#"{"bar":{"workspaces":{"shown":4}}}"#).unwrap();
-        fs::rename(&replacement, &config).unwrap();
-        assert!(watcher.drain_changes().unwrap());
-
-        drop(watcher);
-        fs::remove_dir_all(directory).unwrap();
-    }
-
-    #[test]
-    fn ignores_changes_to_unrelated_files() {
-        let directory = temp_dir();
-        let config = directory.join("config.json");
-        fs::write(&config, b"{}").unwrap();
-        let watcher = WorkspaceConfigWatcher::new(&config).unwrap().unwrap();
-
-        fs::write(directory.join("theme.json"), b"{}").unwrap();
-        assert!(!watcher.drain_changes().unwrap());
-
-        drop(watcher);
-        fs::remove_dir_all(directory).unwrap();
-    }
-
-    #[test]
-    fn missing_config_directory_is_a_non_fatal_no_watch_result() {
-        let directory = temp_dir();
-        fs::remove_dir(&directory).unwrap();
-        let config = directory.join("illogical-impulse/config.json");
-        assert!(WorkspaceConfigWatcher::new(&config).unwrap().is_none());
-    }
-}

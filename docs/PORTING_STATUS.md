@@ -3,7 +3,7 @@
 **Branch:** `rust-port/phase-0`  
 **Upstream:** `end-4/dots-hyprland`  
 **Reference revision at port start:** `2f2a376fdb2ad738bf55f693dd0b474b64bb0ab8`  
-**Latest upstream inspected (2026-11-12):** `cb1c428bf841dabccff1b126904047c28e89ba8c`
+**Latest upstream inspected (2026-11-13):** `cb1c428bf841dabccff1b126904047c28e89ba8c`
 
 ## What is being ported
 
@@ -48,12 +48,13 @@ This Rust project replaces the graphical shell/runtime incrementally. It does no
 - [x] Pure Hyprland event-to-state reducer for focused workspaces/monitors, workspace create/destroy/move/rename, special workspace state, and active-window metadata; emits targeted refresh hints when event payloads are incomplete.
 - [x] Event coordinator joins the non-blocking event stream, reducer, and command IPC; coalesces monitor/workspace/active-window refreshes, reports parse failures without losing neighboring events, and retains failed refreshes for retry.
 - [x] Reconnect/backoff and Wayland event-loop fd registration for the event socket; reconnect deadlines are integrated into the existing blocking poll loop.
+- [x] Drive the default local clock from the same poll loop, waking at the next minute boundary and redrawing only when its formatted time changes; no timer thread or periodic busy polling.
 
 ## Phase 2 — desktop shell parity
 
 Port and test one subsystem at a time:
 
-1. Top bar: per-output surfaces, workspace grouping/occupancy model, native workspace indicators, pointer input, and workspace switching are implemented. Each output renders the configured number of 26 px slots (default 10), a 22 px active marker, connected occupied pills, compact occupied/empty dots, and a labeled pill for an active special workspace; it supports left-click focus, vertical relative-workspace switching, and back-button special-workspace toggling. Remaining work includes rounded/animated rendering, app icons, keyboard/shortcut handling, right-click overview, active-window presentation, clock, system tray, battery, network, volume, media, notifications and resource indicators.
+1. Top bar: per-output surfaces, workspace grouping/occupancy model, native workspace indicators, pointer input, and workspace switching are implemented. Each output renders the configured number of 26 px slots (default 10), a 22 px active marker, connected occupied pills, compact occupied/empty dots, and a labeled pill for an active special workspace; it supports left-click focus, vertical relative-workspace switching, and back-button special-workspace toggling. The bar now renders the local clock at minute precision. Remaining work includes rounded/animated rendering, app icons, keyboard/shortcut handling, right-click overview, active-window presentation, configurable/localized date and clock popup, system tray, battery, network, volume, media, notifications and resource indicators.
 2. Quick settings and sidebars: toggles, device status, controls, search and settings launch.
 3. Overview and window management: foreign-toplevel tracking, previews only on demand, workspace movement.
 4. Dock and app launcher: `.desktop` indexing, fuzzy search, activation and pinned apps.
@@ -122,3 +123,16 @@ Hard constraints:
 
 
 - Final CI verification for this run: [Actions run #48](https://github.com/okillsee08-oss/dots-hyprland/actions/runs/43241104361) and [Actions run #49](https://github.com/okillsee08-oss/dots-hyprland/actions/runs/43241163003) are both green. Run #49 includes the README update and the same Rust source as the formatting-fix commit.
+
+
+## Latest implementation update (2026-11-13)
+
+- Rechecked the fork's Rust branch and upstream `end-4/dots-hyprland` head. Upstream remains at `cb1c428bf841dabccff1b126904047c28e89ba8c` (2026-11-08); no newer upstream commit was present on 2026-11-13.
+- Reviewed the upstream `ClockWidget.qml` and `DateTime.qml`: the bar shows `DateTime.time`, optionally shows `DateTime.longDate`, and exposes a popup. The upstream clock defaults to minute precision and switches to seconds when configured or while the screen is locked. The service also maintains uptime separately.
+- Fast-forwarded `rust-port/phase-0` from `0cfbdbdbf9c336c0c57ad5541eeea074e974a968` to fork merge commit `190ddd7b7f6683e2adf167e4cf659a776bb78723`. This brings in the latest upstream merge without rewriting history; the merge changed four upstream files and did not modify the Rust port.
+- Added a shared Rust clock snapshot using the system local timezone and the upstream default zero-padded 12-hour `hh:mm` display. It also prepares the default `dddd, dd/MM` date string for later use.
+- Added the clock's next-minute deadline to the existing blocking `poll(2)` timeout. The shell redraws panels only when the formatted time changes; no new thread, timer loop, or periodic wakeup was added.
+- Added unit tests for minute/second boundary alignment, midnight and afternoon formatting, second precision, invalid time components, and poll-timeout rounding.
+- The current top bar displays time only. User-configurable Qt format strings, locale-specific weekday names, verbose date visibility, clock popup, and uptime integration remain pending.
+- This run could not execute local `cargo fmt`, `cargo check`, `cargo test`, or Clippy because no local Rust toolchain/repository checkout is available in the hosted editing environment. GitHub Actions is the source of build/test verification after this push.
+- No real NixOS/Hyprland compositor run, output hotplug test, or RSS/performance benchmark has been performed.

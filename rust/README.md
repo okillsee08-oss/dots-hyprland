@@ -35,6 +35,7 @@ The Hyprland compositor remains responsible for windows and composition. This pr
 - `crates/ii-shell/src/render.rs`: software rendering primitives.
 - `crates/ii-shell/src/text.rs`: a shared cosmic-text font system and glyph cache.
 - `crates/ii-shell/src/bus.rs`: shared D-Bus session connection boundary.
+- `crates/ii-shell/src/clock.rs`: local-time clock snapshot with minute/second precision and a poll-loop deadline aligned to the next clock boundary.
 - `crates/ii-shell/src/config.rs`: versionable shell settings model and read-only parsing of the upstream `bar.workspaces.shown` option from `~/.config/illogical-impulse/config.json`; `ii-shell` watches that file's parent directory with inotify and reloads the workspace count through its existing poll loop.
 - `crates/ii-shell/src/output_model.rs`: checked logical-to-buffer geometry for output-bound panels.
 - `crates/ii-shell/src/hyprland_ipc.rs`: bounded typed Hyprland command-socket queries and validated workspace dispatch.
@@ -53,7 +54,7 @@ cargo test --manifest-path rust/Cargo.toml --workspace
 cargo run --manifest-path rust/Cargo.toml -p ii-shell
 ```
 
-The executable creates one top-panel layer surface per advertised Wayland output. A single poll(2) loop waits on the Wayland display and Hyprland broadcast socket together. One bounded worker receives workspace commands from Wayland pointer callbacks and performs short, fresh Hyprland command-socket requests outside the display loop; it is shared by all outputs and never spawned per widget. It uses EventQueue::prepare_read() before sleeping and dispatches Wayland callbacks after the display fd is readable. Hyprland refreshes are coalesced after event batches. Each panel requests a Wayland frame callback and queues at most one follow-up redraw; a queued paint is retried after frame callbacks and buffer-release dispatches, without a repaint timer. The event stream reconnects after startup failures and disconnects with bounded exponential backoff (250 ms to 30 s), using the existing poll loop rather than a timer thread. Command-socket refreshes are still synchronous and bounded by the IPC adapter timeout; asynchronous refresh I/O remains outstanding. This is an early-stage shell, not a complete desktop replacement.
+The executable creates one top-panel layer surface per advertised Wayland output. A single poll(2) loop waits on the Wayland display and Hyprland broadcast socket together. One bounded worker receives workspace commands from Wayland pointer callbacks and performs short, fresh Hyprland command-socket requests outside the display loop; it is shared by all outputs and never spawned per widget. It uses EventQueue::prepare_read() before sleeping and dispatches Wayland callbacks after the display fd is readable. Hyprland refreshes are coalesced after event batches. Each panel requests a Wayland frame callback and queues at most one follow-up redraw; a queued paint is retried after frame callbacks and buffer-release dispatches, without a repaint timer. The event stream reconnects after startup failures and disconnects with bounded exponential backoff (250 ms to 30 s), using the existing poll loop rather than a timer thread. The same poll timeout wakes at the next minute boundary for the local clock; panels redraw only when the formatted time changes. Command-socket refreshes are still synchronous and bounded by the IPC adapter timeout; asynchronous refresh I/O remains outstanding. This is an early-stage shell, not a complete desktop replacement.
 
 ## Memory rules
 
@@ -79,3 +80,13 @@ directory with inotify and is registered in the same blocking event loop as
 Wayland and Hyprland. It reloads only `bar.workspaces.shown`; the upstream
 configuration remains read-only. The parent directory must exist when the
 shell starts. If it is created later, restart the shell to arm the watch.
+
+
+## Clock behavior
+
+The top bar now displays the local time using the upstream default zero-padded
+12-hour `hh:mm` format. A shared clock snapshot also prepares the upstream
+long-date string. The next minute boundary is folded into the existing
+Wayland/Hyprland/config `poll(2)` wait; no timer thread or periodic polling
+loop is added. The popup, user-configurable Qt locale formats, localized
+weekday names, and optional verbose date display remain parity work.
