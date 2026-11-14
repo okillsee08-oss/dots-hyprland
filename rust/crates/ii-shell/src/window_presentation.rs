@@ -68,7 +68,8 @@ mod tests {
 
     #[test]
     fn focused_monitor_shows_the_active_application_and_title() {
-        let presentation = for_monitor(&active_window("firefox", "Project notes"), true, 4);
+        let window = active_window("firefox", "Project notes");
+        let presentation = for_monitor(&window, true, 4);
 
         assert_eq!(presentation.app_name, "firefox");
         assert_eq!(presentation.title, "Project notes");
@@ -76,7 +77,8 @@ mod tests {
 
     #[test]
     fn unfocused_monitor_uses_desktop_and_its_own_workspace_fallback() {
-        let presentation = for_monitor(&active_window("firefox", "Project notes"), false, 12);
+        let window = active_window("firefox", "Project notes");
+        let presentation = for_monitor(&window, false, 12);
 
         assert_eq!(presentation.app_name, "Desktop");
         assert_eq!(presentation.title, "Workspace 12");
@@ -84,7 +86,8 @@ mod tests {
 
     #[test]
     fn missing_active_metadata_falls_back_without_an_empty_label() {
-        let presentation = for_monitor(&active_window("  ", ""), true, 3);
+        let window = active_window("  ", "");
+        let presentation = for_monitor(&window, true, 3);
 
         assert_eq!(presentation.app_name, "Desktop");
         assert_eq!(presentation.title, "Workspace 3");
@@ -92,7 +95,8 @@ mod tests {
 
     #[test]
     fn title_falls_back_when_the_active_class_is_present_but_title_is_empty() {
-        let presentation = for_monitor(&active_window("terminal", ""), true, 2);
+        let window = active_window("terminal", "");
+        let presentation = for_monitor(&window, true, 2);
 
         assert_eq!(presentation.app_name, "terminal");
         assert_eq!(presentation.title, "Workspace 2");
