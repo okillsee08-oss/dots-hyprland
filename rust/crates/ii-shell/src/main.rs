@@ -794,10 +794,8 @@ impl RustShell {
             let class_limit = (available_width / (6 * scale as u32)).min(48) as usize;
             let title_limit = (available_width / (7 * scale as u32)).min(96) as usize;
             if class_limit > 0 {
-                let app_name = window_presentation::truncate_chars(
-                    &presentation.app_name,
-                    class_limit,
-                );
+                let app_name =
+                    window_presentation::truncate_chars(&presentation.app_name, class_limit);
                 text.draw_text(
                     pixels,
                     geometry.buffer_width,
@@ -808,10 +806,7 @@ impl RustShell {
                 );
             }
             if title_limit > 0 {
-                let title = window_presentation::truncate_chars(
-                    &presentation.title,
-                    title_limit,
-                );
+                let title = window_presentation::truncate_chars(&presentation.title, title_limit);
                 text.draw_text(
                     pixels,
                     geometry.buffer_width,
