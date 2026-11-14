@@ -14,10 +14,10 @@ use std::{
 use ii_shell::{
     clock::ClockState,
     config::WorkspaceBarConfig,
-    hyprland_ipc::{HyprlandIpc, WorkspaceCommand, WorkspaceDirection},
+    hyprland_ipc::{ActiveWindow, HyprlandIpc, WorkspaceCommand, WorkspaceDirection},
     hyprland_state::HyprlandState,
     output_model::PanelGeometry,
-    render, text,
+    render, text, window_presentation,
     workspace_model::WorkspaceModel,
 };
 use smithay_client_toolkit::reexports::client::{
@@ -146,6 +146,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         pool,
         text: text::TextEngine::new(),
         clock: ClockState::new(SystemTime::now()),
+        active_window: ActiveWindow {
+            address: String::new(),
+            app_class: String::new(),
+            title: String::new(),
+        },
+        focused_monitor_name: None,
         panels: HashMap::new(),
         workspace_models: HashMap::new(),
         workspace_shown_count,
@@ -377,6 +383,8 @@ struct RustShell {
     pool: SlotPool,
     text: text::TextEngine,
     clock: ClockState,
+    active_window: ActiveWindow,
+    focused_monitor_name: Option<String>,
     panels: HashMap<u32, PanelSurface>,
     workspace_models: HashMap<u32, WorkspaceModel>,
     workspace_shown_count: usize,
@@ -462,6 +470,12 @@ impl RustShell {
     }
 
     fn update_workspace_models(&mut self, state: &HyprlandState) {
+        self.active_window = state.active_window.clone();
+        self.focused_monitor_name = state
+            .monitors
+            .iter()
+            .find(|monitor| monitor.focused)
+            .map(|monitor| monitor.name.clone());
         self.workspace_models.clear();
         for (&output_id, panel) in &self.panels {
             let Some(monitor) = state
@@ -493,6 +507,12 @@ impl RustShell {
 
     fn clear_workspace_models(&mut self) {
         self.workspace_models.clear();
+        self.active_window = ActiveWindow {
+            address: String::new(),
+            app_class: String::new(),
+            title: String::new(),
+        };
+        self.focused_monitor_name = None;
         self.workspace_models_dirty = false;
     }
 
@@ -674,12 +694,14 @@ impl RustShell {
         output_id: u32,
         qh: &QueueHandle<Self>,
     ) -> Result<(), Box<dyn Error>> {
-        let (pool, text, panels, workspace_models, clock) = (
+        let (pool, text, panels, workspace_models, clock, active_window, focused_monitor_name) = (
             &mut self.pool,
             &mut self.text,
             &mut self.panels,
             &self.workspace_models,
             &self.clock,
+            &self.active_window,
+            &self.focused_monitor_name,
         );
         let Some(panel) = panels.get_mut(&output_id) else {
             return Ok(());
@@ -745,6 +767,14 @@ impl RustShell {
                 .map_or(20, |model| (8 + model.slots.len() as u32 * 26 + 8) as i32)
                 * scale
                 + special_width;
+            let workspace_id = workspace_models
+                .get(&output_id)
+                .map_or(1, |model| model.active_workspace_id);
+            let presentation = window_presentation::for_monitor(
+                active_window,
+                focused_monitor_name.as_deref() == Some(panel.output_name.as_str()),
+                workspace_id,
+            );
             let clock_label = &clock.text().time;
             let clock_width = (clock_label.chars().count() as u32)
                 .saturating_mul(8)
@@ -754,17 +784,44 @@ impl RustShell {
                 .buffer_width
                 .checked_sub(clock_width.saturating_add(clock_padding))
                 .and_then(|x| i32::try_from(x).ok());
+            let available_right = clock_x.unwrap_or(geometry.buffer_width as i32);
+            let available_width = available_right
+                .saturating_sub(title_x)
+                .saturating_sub(8 * scale)
+                .max(0) as u32;
+            // Approximate glyph widths only to reserve space before the clock;
+            // cosmic-text still clips the final shaped glyph spans to the SHM buffer.
+            let class_limit = (available_width / (6 * scale as u32)).min(48) as usize;
+            let title_limit = (available_width / (7 * scale as u32)).min(96) as usize;
+            if class_limit > 0 {
+                let app_name = window_presentation::truncate_chars(
+                    &presentation.app_name,
+                    class_limit,
+                );
+                text.draw_text(
+                    pixels,
+                    geometry.buffer_width,
+                    geometry.buffer_height,
+                    &app_name,
+                    (title_x, 2 * scale),
+                    10.0 * scale as f32,
+                );
+            }
+            if title_limit > 0 {
+                let title = window_presentation::truncate_chars(
+                    &presentation.title,
+                    title_limit,
+                );
+                text.draw_text(
+                    pixels,
+                    geometry.buffer_width,
+                    geometry.buffer_height,
+                    &title,
+                    (title_x, 17 * scale),
+                    12.0 * scale as f32,
+                );
+            }
             if let Some(clock_x) = clock_x {
-                if title_x.saturating_add(160i32.saturating_mul(scale)) < clock_x {
-                    text.draw_text(
-                        pixels,
-                        geometry.buffer_width,
-                        geometry.buffer_height,
-                        "illogical impulse · Rust",
-                        (title_x, 0),
-                        14.0 * scale as f32,
-                    );
-                }
                 text.draw_text(
                     pixels,
                     geometry.buffer_width,

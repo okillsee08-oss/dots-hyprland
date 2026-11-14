@@ -5,6 +5,7 @@ pub mod hyprland_ipc;
 pub mod output_model;
 pub mod render;
 pub mod text;
+pub mod window_presentation;
 pub mod workspace_model;
 
 pub mod hyprland_events;
