@@ -42,7 +42,6 @@ The Hyprland compositor remains responsible for windows and composition. This pr
 - `crates/ii-shell/src/output_model.rs`: checked logical-to-buffer geometry for output-bound panels.
 - `crates/ii-shell/src/hyprland_ipc.rs`: bounded typed Hyprland monitor/workspace/active-window/client queries and validated workspace dispatch.
 - `crates/ii-shell/src/workspace_model.rs`: per-monitor workspace grouping, occupancy projection, largest-client projection for each visible slot, and logical-coordinate pointer hit testing.
-- `crates/ii-shell/src/workspace_model.rs`: per-monitor workspace grouping, occupancy projection and logical-coordinate pointer hit testing.
 - `crates/ii-shell/src/hyprland_state.rs`: pure event-to-state reducer with targeted refresh hints.
 - `crates/ii-shell/src/hyprland_runtime.rs`: event-batch coordinator and coalesced targeted command-socket refreshes.
 
