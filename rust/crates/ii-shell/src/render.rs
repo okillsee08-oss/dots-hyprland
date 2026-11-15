@@ -177,6 +177,7 @@ mod tests {
                     is_fake: false,
                 },
             ],
+            biggest_windows: vec![None; 3],
             special_workspace_name: None,
         };
 
@@ -220,6 +221,7 @@ mod tests {
                     is_fake: false,
                 },
             ],
+            biggest_windows: vec![None; 3],
             special_workspace_name: Some("chat".into()),
         };
 
@@ -248,6 +250,7 @@ mod tests {
             active_index: 0,
             fake_workspace_id: -9999,
             slots: Vec::new(),
+            biggest_windows: Vec::new(),
             special_workspace_name: None,
         };
 
