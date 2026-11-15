@@ -207,7 +207,6 @@ mod tests {
         }
     }
 
-
     fn client(address: &str, workspace_id: i64, size: [i64; 2]) -> Client {
         Client {
             address: address.into(),

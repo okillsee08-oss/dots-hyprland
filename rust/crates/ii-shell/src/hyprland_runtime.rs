@@ -299,7 +299,9 @@ mod tests {
                     }
                     "j/workspaces" => r#"[{"id":1,"name":"1","monitor":"eDP-1"}]"#,
                     "j/activewindow" => r#"{"address":"0x123","class":"firefox","title":"Docs"}"#,
-                    "j/clients" => r#"[{"address":"0x123","class":"firefox","title":"Docs","size":[1200,800],"workspace":{"id":1,"name":"1"}}]"#,
+                    "j/clients" => {
+                        r#"[{"address":"0x123","class":"firefox","title":"Docs","size":[1200,800],"workspace":{"id":1,"name":"1"}}]"#
+                    },
                     other => panic!("unexpected IPC request: {other}"),
                 };
                 stream.write_all(response.as_bytes()).unwrap();
@@ -373,7 +375,6 @@ mod tests {
         assert!(runtime.pending_refresh().monitors);
         assert!(runtime.pending_refresh().workspaces);
     }
-
 
     #[test]
     fn failed_client_inventory_refresh_remains_pending() {

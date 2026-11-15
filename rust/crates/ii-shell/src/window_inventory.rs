@@ -67,13 +67,11 @@ mod tests {
         ];
 
         assert_eq!(
-            biggest_window_for_workspace(&clients, 1)
-                .map(|window| window.address.as_str()),
+            biggest_window_for_workspace(&clients, 1).map(|window| window.address.as_str()),
             Some("0x2")
         );
         assert_eq!(
-            biggest_window_for_workspace(&clients, 2)
-                .map(|window| window.address.as_str()),
+            biggest_window_for_workspace(&clients, 2).map(|window| window.address.as_str()),
             Some("0x3")
         );
         assert!(biggest_window_for_workspace(&clients, 3).is_none());
@@ -87,8 +85,7 @@ mod tests {
         ];
 
         assert_eq!(
-            biggest_window_for_workspace(&clients, 4)
-                .map(|window| window.address.as_str()),
+            biggest_window_for_workspace(&clients, 4).map(|window| window.address.as_str()),
             Some("0x1")
         );
     }

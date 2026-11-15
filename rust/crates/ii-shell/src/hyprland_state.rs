@@ -6,7 +6,9 @@
 
 use crate::{
     hyprland_events::HyprlandEvent,
-    hyprland_ipc::{ActiveWindow, Client, Monitor, Snapshot, SpecialWorkspace, Workspace, WorkspaceRef},
+    hyprland_ipc::{
+        ActiveWindow, Client, Monitor, Snapshot, SpecialWorkspace, Workspace, WorkspaceRef,
+    },
 };
 
 const SPECIAL_WORKSPACE_ID: i64 = -99;
@@ -628,7 +630,6 @@ mod tests {
         });
         assert_eq!(change, StateChange::default());
     }
-
 
     #[test]
     fn window_inventory_events_request_a_coalesced_client_refresh() {

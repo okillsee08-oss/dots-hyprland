@@ -372,7 +372,6 @@ mod tests {
         assert!(monitor.special_workspace.is_none());
     }
 
-
     #[test]
     fn parses_client_inventory_with_workspace_and_geometry() {
         let clients: Vec<Client> = serde_json::from_str(
