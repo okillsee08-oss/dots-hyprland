@@ -485,9 +485,10 @@ impl RustShell {
             else {
                 continue;
             };
-            match WorkspaceModel::from_monitor(
+            match WorkspaceModel::from_monitor_with_clients(
                 monitor,
                 &state.workspaces,
+                &state.clients,
                 self.workspace_shown_count,
                 false,
             ) {
@@ -767,11 +768,13 @@ impl RustShell {
                 .map_or(20, |model| (8 + model.slots.len() as u32 * 26 + 8) as i32)
                 * scale
                 + special_width;
-            let workspace_id = workspace_models
-                .get(&output_id)
-                .map_or(1, |model| model.active_workspace_id);
+            let model = workspace_models.get(&output_id);
+            let workspace_id = model.map_or(1, |model| model.active_workspace_id);
+            let biggest_window =
+                model.and_then(|model| model.biggest_window_at(model.active_index));
             let presentation = window_presentation::for_monitor(
                 active_window,
+                biggest_window,
                 focused_monitor_name.as_deref() == Some(panel.output_name.as_str()),
                 workspace_id,
             );

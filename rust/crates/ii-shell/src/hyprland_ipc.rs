@@ -20,7 +20,7 @@ const SOCKET_TIMEOUT: Duration = Duration::from_secs(2);
 const COMMAND_TIMEOUT: Duration = Duration::from_millis(500);
 const BATCH_REPLY_DELIMITER: &str = "\n\n\n";
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct WorkspaceRef {
     pub id: i64,
     #[serde(default)]
@@ -67,10 +67,25 @@ pub struct ActiveWindow {
     pub title: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct Client {
+    #[serde(default)]
+    pub address: String,
+    #[serde(default, rename = "class")]
+    pub app_class: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub size: [i64; 2],
+    #[serde(default)]
+    pub workspace: Option<WorkspaceRef>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Snapshot {
     pub monitors: Vec<Monitor>,
     pub workspaces: Vec<Workspace>,
+    pub clients: Vec<Client>,
     pub active_window: ActiveWindow,
 }
 
@@ -234,11 +249,16 @@ impl HyprlandIpc {
         self.query_json("j/activewindow")
     }
 
+    pub fn clients(&self) -> Result<Vec<Client>, IpcError> {
+        self.query_json("j/clients")
+    }
+
     pub fn snapshot(&self) -> Result<Snapshot, IpcError> {
         Ok(Snapshot {
             monitors: self.monitors()?,
             workspaces: self.workspaces()?,
             active_window: self.active_window()?,
+            clients: self.clients()?,
         })
     }
 
@@ -350,6 +370,32 @@ mod tests {
         assert!(!monitor.focused);
         assert!(monitor.active_workspace.is_none());
         assert!(monitor.special_workspace.is_none());
+    }
+
+
+    #[test]
+    fn parses_client_inventory_with_workspace_and_geometry() {
+        let clients: Vec<Client> = serde_json::from_str(
+            r#"[{"address":"0x123","class":"firefox","title":"Docs","size":[1200,800],"workspace":{"id":2,"name":"2"},"monitor":0,"mapped":true}]"#,
+        )
+        .unwrap();
+
+        assert_eq!(clients.len(), 1);
+        assert_eq!(clients[0].address, "0x123");
+        assert_eq!(clients[0].app_class, "firefox");
+        assert_eq!(clients[0].size, [1200, 800]);
+        assert_eq!(clients[0].workspace.as_ref().unwrap().id, 2);
+    }
+
+    #[test]
+    fn defaults_missing_client_inventory_fields_safely() {
+        let client: Client = serde_json::from_str(r#"{"address":"0x456"}"#).unwrap();
+
+        assert_eq!(client.address, "0x456");
+        assert!(client.app_class.is_empty());
+        assert!(client.title.is_empty());
+        assert_eq!(client.size, [0, 0]);
+        assert!(client.workspace.is_none());
     }
 
     #[test]

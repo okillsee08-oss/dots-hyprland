@@ -81,6 +81,7 @@ pub struct RefreshPlan {
     pub monitors: bool,
     pub workspaces: bool,
     pub active_window: bool,
+    pub clients: bool,
 }
 
 impl RefreshPlan {
@@ -88,10 +89,11 @@ impl RefreshPlan {
         self.monitors |= change.refresh_monitors;
         self.workspaces |= change.refresh_workspaces;
         self.active_window |= change.refresh_active_window;
+        self.clients |= change.refresh_clients;
     }
 
     pub fn is_empty(self) -> bool {
-        !self.monitors && !self.workspaces && !self.active_window
+        !self.monitors && !self.workspaces && !self.active_window && !self.clients
     }
 }
 
@@ -108,6 +110,7 @@ pub struct RefreshReport {
     pub monitors_refreshed: bool,
     pub workspaces_refreshed: bool,
     pub active_window_refreshed: bool,
+    pub clients_refreshed: bool,
     pub state_changed: bool,
 }
 
@@ -207,6 +210,14 @@ impl HyprlandRuntime {
             report.active_window_refreshed = true;
         }
 
+        if self.pending.clients {
+            let clients = self.ipc.clients()?;
+            report.state_changed |= self.state.clients != clients;
+            self.state.clients = clients;
+            self.pending.clients = false;
+            report.clients_refreshed = true;
+        }
+
         Ok(report)
     }
 
@@ -252,6 +263,7 @@ mod tests {
         HyprlandState {
             monitors: Vec::new(),
             workspaces: Vec::new(),
+            clients: Vec::new(),
             active_window: ActiveWindow {
                 address: String::new(),
                 app_class: String::new(),
@@ -276,7 +288,7 @@ mod tests {
         let listener = UnixListener::bind(&path).unwrap();
         let server = thread::spawn(move || {
             let mut requests = Vec::new();
-            for _ in 0..3 {
+            for _ in 0..4 {
                 let (mut stream, _) = listener.accept().unwrap();
                 let mut request = String::new();
                 stream.read_to_string(&mut request).unwrap();
@@ -287,6 +299,7 @@ mod tests {
                     }
                     "j/workspaces" => r#"[{"id":1,"name":"1","monitor":"eDP-1"}]"#,
                     "j/activewindow" => r#"{"address":"0x123","class":"firefox","title":"Docs"}"#,
+                    "j/clients" => r#"[{"address":"0x123","class":"firefox","title":"Docs","size":[1200,800],"workspace":{"id":1,"name":"1"}}]"#,
                     other => panic!("unexpected IPC request: {other}"),
                 };
                 stream.write_all(response.as_bytes()).unwrap();
@@ -296,11 +309,11 @@ mod tests {
 
         let (mut runtime, mut event_writer) = runtime_with_event_pair(path.clone());
         event_writer
-            .write_all(b"monitoradded>>DP-1\nmonitoradded>>DP-2\nactivewindowv2>>0x123\n")
+            .write_all(b"monitoradded>>DP-1\nmonitoradded>>DP-2\nactivewindowv2>>0x123\nopenwindow>>0x123,1,firefox,Docs\n")
             .unwrap();
 
         let drained = runtime.drain_ready_events().unwrap();
-        assert_eq!(drained.applied, 3);
+        assert_eq!(drained.applied, 4);
         assert!(drained.parse_errors.is_empty());
         assert!(drained.state_changed);
         assert_eq!(
@@ -309,6 +322,7 @@ mod tests {
                 monitors: true,
                 workspaces: true,
                 active_window: true,
+                clients: true,
             }
         );
 
@@ -316,16 +330,18 @@ mod tests {
         assert!(refreshed.monitors_refreshed);
         assert!(refreshed.workspaces_refreshed);
         assert!(refreshed.active_window_refreshed);
+        assert!(refreshed.clients_refreshed);
         assert!(refreshed.state_changed);
         assert!(runtime.pending_refresh().is_empty());
         assert_eq!(runtime.state().monitors.len(), 1);
         assert_eq!(runtime.state().workspaces.len(), 1);
         assert_eq!(runtime.state().active_window.app_class, "firefox");
+        assert_eq!(runtime.state().clients.len(), 1);
 
         let requests = server.join().unwrap();
         assert_eq!(
             requests,
-            vec!["j/monitors", "j/workspaces", "j/activewindow"]
+            vec!["j/monitors", "j/workspaces", "j/activewindow", "j/clients"]
         );
         fs::remove_file(path).unwrap();
     }
@@ -358,6 +374,21 @@ mod tests {
         assert!(runtime.pending_refresh().workspaces);
     }
 
+
+    #[test]
+    fn failed_client_inventory_refresh_remains_pending() {
+        let path = socket_path();
+        let (mut runtime, mut event_writer) = runtime_with_event_pair(path);
+        event_writer
+            .write_all(b"openwindow>>0xabc,1,firefox,Docs\n")
+            .unwrap();
+        runtime.drain_ready_events().unwrap();
+
+        assert!(runtime.pending_refresh().clients);
+        assert!(runtime.refresh_pending().is_err());
+        assert!(runtime.pending_refresh().clients);
+    }
+
     #[test]
     fn identical_authoritative_snapshot_does_not_report_a_change() {
         let path = socket_path();
@@ -365,6 +396,7 @@ mod tests {
         let snapshot = Snapshot {
             monitors: Vec::<Monitor>::new(),
             workspaces: Vec::<Workspace>::new(),
+            clients: Vec::new(),
             active_window: ActiveWindow {
                 address: String::new(),
                 app_class: String::new(),

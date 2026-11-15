@@ -3,7 +3,7 @@
 **Branch:** `rust-port/phase-0`  
 **Upstream:** `end-4/dots-hyprland`  
 **Reference revision at port start:** `2f2a376fdb2ad738bf55f693dd0b474b64bb0ab8`  
-**Latest upstream inspected (2026-11-13):** `cb1c428bf841dabccff1b126904047c28e89ba8c`
+**Latest upstream inspected (2026-11-15):** `21733c3ca7f4edc20faafedea844dc96002c6f7f`
 
 ## What is being ported
 
@@ -23,7 +23,8 @@ This Rust project replaces the graphical shell/runtime incrementally. It does no
 - [x] Add JSON config model and basic unit tests.
 - [x] Add GitHub Actions checks for formatting, compilation, tests, and Clippy.
 - [ ] Run the first build/test on a real NixOS/Hyprland machine. GitHub source edits cannot prove compositor compatibility or runtime RSS.
-- [x] Add a bounded Hyprland command-socket adapter with typed monitor/workspace/window queries and validated workspace dispatch, plus parser/path-validation tests.
+- [x] Add a bounded Hyprland command-socket adapter with typed monitor/workspace/window/client queries and validated workspace dispatch, plus parser/path-validation tests.
+- [x] Refresh the bounded client inventory on window open/close/move/title/fullscreen events through the existing event coordinator; failed client queries remain pending.
 
 ## Phase 1 — platform/runtime
 
@@ -54,7 +55,7 @@ This Rust project replaces the graphical shell/runtime incrementally. It does no
 
 Port and test one subsystem at a time:
 
-1. Top bar: per-output surfaces, workspace grouping/occupancy model, native workspace indicators, pointer input, workspace switching, local clock, and focused-monitor active-window presentation are implemented. Each output renders the configured number of 26 px slots (default 10), a 22 px active marker, connected occupied pills, compact occupied/empty dots, and a labeled pill for an active special workspace; it supports left-click focus, vertical relative-workspace switching, and back-button special-workspace toggling. The focused output shows the active Hyprland app class and title; other outputs currently show a Desktop/Workspace fallback. Remaining work includes per-output biggest-window presentation, app icons, rounded/animated rendering, keyboard/shortcut handling, right-click overview, configurable/localized date and clock popup, system tray, battery, network, volume, media, notifications and resource indicators.
+1. Top bar: per-output surfaces, workspace grouping/occupancy model, native workspace indicators, pointer input, workspace switching, local clock, focused-monitor active-window presentation, and largest-window-per-workspace projection are implemented. Each output renders the configured number of 26 px slots (default 10), a 22 px active marker, connected occupied pills, compact occupied/empty dots, and a labeled pill for an active special workspace; it supports left-click focus, vertical relative-workspace switching, and back-button special-workspace toggling. The focused output shows the active Hyprland app class/title when its workspace has a client; other outputs show the largest client in their active workspace. Each visible workspace slot now exposes its largest client for icon rendering. Remaining work includes app icon lookup/rendering, rounded/animated rendering, keyboard/shortcut handling, right-click overview, configurable/localized date and clock popup, system tray, battery, network, volume, media, notifications and resource indicators.
 2. Quick settings and sidebars: toggles, device status, controls, search and settings launch.
 3. Overview and window management: foreign-toplevel tracking, previews only on demand, workspace movement.
 4. Dock and app launcher: `.desktop` indexing, fuzzy search, activation and pinned apps.
@@ -147,3 +148,16 @@ Hard constraints:
 - Added a pure presentation module with tests for focused/unfocused output behavior, missing metadata, workspace fallback, and UTF-8-safe truncation. Label lengths are capped to the available space before the clock so long titles cannot paint over the clock area.
 - The implementation reuses the existing Hyprland snapshot/event path and poll loop; it adds no socket, worker, timer, or dependency. The full client list, largest-window-per-workspace selection, and application icon lookup/rendering remain the next related milestone.
 - GitHub Actions run [#55](https://github.com/okillsee08-oss/dots-hyprland/actions/runs/43605086736) for the final source commit `e88b369c9bd22bc7349eb0349539d48e0490ea49` passed Format, Check, Test, and Clippy. The test step passed 66 workspace tests plus 3 config-watcher tests (69 total). Earlier run #53 failed at Format and run #54 exposed four test-only lifetime errors; both were corrected before the green run. No local Rust toolchain or NixOS/Hyprland compositor session is available in this hosted editing environment; runtime behavior and RSS/performance remain unverified.
+
+
+## Latest implementation update (2026-11-15)
+
+- Rechecked the Rust branch head at `20914124bdd4eb2dfc2fe22b9ee5271d30674472`; it is nine commits ahead of fork `main` and zero behind. The latest upstream `end-4/dots-hyprland` head is `21733c3ca7f4edc20faafedea844dc96002c6f7f` (2026-11-15).
+- Reviewed upstream changes since the fork's last upstream merge. The commits `fd8f15f`, `18c214d`, and `21733c3` update Gentoo Quickshell packaging metadata only; they do not change the QML behavior being ported, so no unrelated packaging-only merge was added to this Rust feature commit.
+- Re-read upstream `HyprlandData.qml`, `WorkspaceModel.qml`, `Workspaces.qml`, and `ActiveWindow.qml`. The reference queries `hyprctl clients -j`, indexes clients by address, selects the first largest-area client per workspace, uses that client class for workspace app-icon lookup, and shows the largest active-workspace client on non-focused monitors.
+- Added a typed, default-tolerant Hyprland client model and a bounded `j/clients` command-socket query. The initial snapshot now includes the client inventory.
+- Added coalesced client-list refresh requests for window open, close, move, title-change, fullscreen and config-reload events. The event coordinator clears the refresh flag only after a successful bounded query; failed requests remain pending.
+- Added a pure largest-window selector that matches the QML reduce behavior: workspace-scoped selection, area comparison, stable first-client tie handling, and zero-area rejection. Each visible workspace slot now carries its selected client.
+- Updated the two-line top-bar presentation: the focused monitor uses the active-window metadata when a client exists in its active workspace; non-focused monitors show the largest client in their active workspace. App icon lookup/rendering is still pending.
+- Added tests for client JSON defaults, workspace filtering, largest-area selection, equal-area ties, missing/negative geometry, per-slot projection, event refresh coalescing, successful client refresh, and failed-refresh retention.
+- No local Rust toolchain or NixOS/Hyprland compositor session is available in this hosted editing environment. Local `cargo fmt`, `cargo check`, `cargo test`, and Clippy, plus live runtime behavior and RSS/performance, remain unverified until CI and a real compositor run.
