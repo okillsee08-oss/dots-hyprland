@@ -3,7 +3,7 @@
 **Branch:** `rust-port/phase-0`  
 **Upstream:** `end-4/dots-hyprland`  
 **Reference revision at port start:** `2f2a376fdb2ad738bf55f693dd0b474b64bb0ab8`  
-**Latest upstream inspected (2026-11-16):** `21733c3ca7f4edc20faafedea844dc96002c6f7f`
+**Latest upstream inspected (2026-11-17):** `21733c3ca7f4edc20faafedea844dc96002c6f7f`
 
 ## What is being ported
 
@@ -55,7 +55,7 @@ This Rust project replaces the graphical shell/runtime incrementally. It does no
 
 Port and test one subsystem at a time:
 
-1. Top bar: per-output surfaces, workspace grouping/occupancy model, native workspace indicators, pointer input, workspace switching, local clock, focused-monitor active-window presentation, and largest-window-per-workspace projection are implemented. Each output renders the configured number of 26 px slots (default 10), a 22 px active marker, connected occupied pills, compact occupied/empty dots, and a labeled pill for an active special workspace; it supports left-click focus, vertical relative-workspace switching, and back-button special-workspace toggling. The focused output shows the active Hyprland app class/title when its workspace has a client; other outputs show the largest client in their active workspace. Each visible workspace slot now exposes its largest client for icon rendering. Remaining work includes SVG/XPM rasterization, icon-theme inheritance and live theme-change detection, upstream monochrome/colorizer effects, rounded/animated rendering, keyboard/shortcut handling, right-click overview, configurable/localized date and clock popup, system tray, battery, network, volume, media, notifications and resource indicators.
+1. Top bar: per-output surfaces, workspace grouping/occupancy model, native workspace indicators, pointer input, workspace switching, local clock, focused-monitor active-window presentation, and largest-window-per-workspace projection are implemented. Each output renders the configured number of 26 px slots (default 10), a 22 px active marker, connected occupied pills, compact occupied/empty dots, and a labeled pill for an active special workspace; it supports left-click focus, vertical relative-workspace switching, and back-button special-workspace toggling. The focused output shows the active Hyprland app class/title when its workspace has a client; other outputs show the largest client in their active workspace. Each visible workspace slot now exposes its largest client for icon rendering. Remaining work includes SVG/XPM rasterization and live theme-change detection, upstream monochrome/colorizer effects, rounded/animated rendering, keyboard/shortcut handling, right-click overview, configurable/localized date and clock popup, system tray, battery, network, volume, media, notifications and resource indicators.
 2. Quick settings and sidebars: toggles, device status, controls, search and settings launch.
 3. Overview and window management: foreign-toplevel tracking, previews only on demand, workspace movement.
 4. Dock and app launcher: `.desktop` indexing, fuzzy search, activation and pinned apps.
@@ -176,3 +176,16 @@ Hard constraints:
 - Added tests for desktop ID and StartupWMClass lookup, normal and regex substitutions, normalized and fuzzy lookup, theme path selection, PNG decode/cache behavior, oversized PNG rejection, and direct rendering into the caller-owned panel buffer.
 - GitHub Actions [run #63](https://github.com/okillsee08-oss/dots-hyprland/actions/runs/43908601639) for commit `93e89c7f6e79262e2598fce362550a326ddde560` passed Format, Check, Test, and Clippy. The test step passed 84 Rust tests plus 3 config-watcher tests (87 total). Run #61 initially failed at Format; run #62 passed Format, Check and Test but Clippy found one manual-contains warning and one unnecessary mutability warning. Both were fixed before run #63.
 - The hosted editing environment has no local `rustc` or `cargo`, so the four commands could not be run locally; GitHub Actions executed the checks. No NixOS/Hyprland compositor session, output-hotplug test, or RSS/PSS/CPU benchmark was available. Runtime compatibility and measured memory improvement remain unverified.
+
+
+## Latest implementation update (2026-11-17)
+
+- Rechecked the fork's `rust-port/phase-0` branch against `main`: before this run it was 19 commits ahead and zero behind, at `cf062c404282adaa23e34f19e573007ea8b47131`. The new implementation commit is `7d2ed61deecd42c222e1b526973f19c55b874101`. The latest upstream `end-4/dots-hyprland` revision remains `21733c3ca7f4edc20faafedea844dc96002c6f7f` (2026-11-15); the newest upstream commits since that revision have not changed the inspected AppSearch/workspace QML behavior.
+- Re-inspected upstream `dots/.config/quickshell/ii/services/AppSearch.qml` and `dots/.config/quickshell/ii/modules/ii/bar/Workspaces.qml` at `21733c3`. AppSearch uses the desktop-entry icon followed by substitutions and guesses; Workspaces resolves the biggest workspace client's class through AppSearch and Quickshell's icon theme resolver.
+- Added freedesktop `index.theme` parsing to the Rust icon resolver. The configured theme now uses declared `Directories` and `ScaledDirectories`, then follows `Inherits` recursively before the common fallbacks, preserving local-theme-first lookup order.
+- Added hard bounds for index.theme file size (256 KiB), theme count (32), inheritance depth (8), directory entries per theme (64), total search directories (512), and individual list items (128 bytes). Theme names and directory entries must be safe relative path components; traversal attempts and cyclic inheritance are rejected.
+- Added tests for custom theme directory metadata, inherited theme fallback, local-theme priority, inheritance cycles, path traversal rejection, and hicolor fallback.
+- Updated `rust/README.md` and this status record. Original upstream QML, configuration, scripts, assets and license are unchanged.
+- Source implementation commit: [`7d2ed61`](https://github.com/okillsee08-oss/dots-hyprland/commit/7d2ed61deecd42c222e1b526973f19c55b874101). Formatting, build, tests and Clippy have not yet been verified for this new commit in this run; no local Rust toolchain is available in the hosted environment, so GitHub Actions must provide that verification.
+- Opened [PR #1](https://github.com/okillsee08-oss/dots-hyprland/pull/1) to integrate the previously CI-verified native shell foundations into `main`. The PR is not merged; the latest implementation must pass CI and GitHub must confirm mergeability before any main-branch integration.
+- No real NixOS/Hyprland compositor session or RSS/PSS/CPU/frame-time benchmark has been performed. Runtime compatibility and a measured memory improvement remain unverified.
