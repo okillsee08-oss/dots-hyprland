@@ -9,7 +9,7 @@
 use std::{
     collections::HashMap,
     env, fs,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
 };
 
 use tiny_skia::Pixmap;
@@ -20,6 +20,11 @@ const MAX_DESKTOP_FILE_BYTES: u64 = 128 * 1024;
 const MAX_ICON_CACHE: usize = 128;
 const MAX_ICON_FILE_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_ICON_DIMENSION: u32 = 512;
+const MAX_ICON_THEMES: usize = 32;
+const MAX_THEME_INHERITANCE_DEPTH: usize = 8;
+const MAX_THEME_INDEX_BYTES: u64 = 256 * 1024;
+const MAX_THEME_DIRECTORIES: usize = 64;
+const MAX_ICON_SEARCH_DIRECTORIES: usize = 512;
 const ICON_EXTENSIONS: [&str; 3] = ["png", "svg", "xpm"];
 const ICON_SUBDIRECTORIES: [&str; 10] = [
     "scalable/apps",
@@ -125,11 +130,16 @@ impl IconResolver {
         }
 
         let mut icon_directories = Vec::new();
-        for base in icon_bases {
+        for base in &icon_bases {
+            let mut visited_themes = Vec::new();
             for theme in &themes {
-                for subdirectory in ICON_SUBDIRECTORIES {
-                    push_unique(&mut icon_directories, base.join(theme).join(subdirectory));
-                }
+                collect_icon_theme_directories(
+                    base,
+                    theme,
+                    &mut visited_themes,
+                    &mut icon_directories,
+                    0,
+                );
             }
         }
         for root in &data_roots {
@@ -322,6 +332,112 @@ impl IconResolver {
         }
         None
     }
+}
+
+
+/// Resolve the configured theme, its freedesktop inheritance chain, and the
+/// bounded built-in fallbacks. Theme names and index.theme directory entries
+/// are treated as untrusted path components.
+fn collect_icon_theme_directories(
+    base: &Path,
+    theme: &str,
+    visited: &mut Vec<String>,
+    output: &mut Vec<PathBuf>,
+    depth: usize,
+) {
+    if depth > MAX_THEME_INHERITANCE_DEPTH
+        || visited.len() >= MAX_ICON_THEMES
+        || output.len() >= MAX_ICON_SEARCH_DIRECTORIES
+        || !is_safe_icon_theme_name(theme)
+        || visited.iter().any(|visited_theme| visited_theme == theme)
+    {
+        return;
+    }
+
+    visited.push(theme.to_owned());
+    let theme_root = base.join(theme);
+    let index_path = theme_root.join("index.theme");
+    let (inherits, mut directories) = read_icon_theme_index(&index_path).unwrap_or_default();
+
+    if directories.is_empty() {
+        directories.extend(ICON_SUBDIRECTORIES.iter().map(|directory| directory.to_string()));
+    }
+
+    for directory in directories.into_iter().take(MAX_THEME_DIRECTORIES) {
+        if output.len() >= MAX_ICON_SEARCH_DIRECTORIES {
+            break;
+        }
+        if is_safe_icon_theme_directory(&directory) {
+            push_unique(output, theme_root.join(directory));
+        }
+    }
+
+    for inherited_theme in inherits.into_iter().take(MAX_ICON_THEMES) {
+        collect_icon_theme_directories(
+            base,
+            &inherited_theme,
+            visited,
+            output,
+            depth.saturating_add(1),
+        );
+    }
+}
+
+fn read_icon_theme_index(path: &Path) -> Option<(Vec<String>, Vec<String>)> {
+    if fs::metadata(path).ok()?.len() > MAX_THEME_INDEX_BYTES {
+        return None;
+    }
+    let contents = fs::read_to_string(path).ok()?;
+    let mut in_icon_theme = false;
+    let mut inherits = Vec::new();
+    let mut directories = Vec::new();
+
+    for line in contents.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if line.starts_with('[') && line.ends_with(']') {
+            in_icon_theme = line == "[Icon Theme]";
+            continue;
+        }
+        if !in_icon_theme {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        match key.trim() {
+            "Inherits" => parse_icon_theme_list(value, &mut inherits),
+            "Directories" | "ScaledDirectories" => {
+                parse_icon_theme_list(value, &mut directories)
+            }
+            _ => {}
+        }
+    }
+
+    Some((inherits, directories))
+}
+
+fn parse_icon_theme_list(value: &str, output: &mut Vec<String>) {
+    for item in value.split(';').map(str::trim).filter(|item| !item.is_empty()) {
+        if item.len() <= 128 {
+            push_unique(output, item.to_owned());
+        }
+    }
+}
+
+fn is_safe_icon_theme_name(theme: &str) -> bool {
+    let mut components = Path::new(theme).components();
+    matches!(components.next(), Some(Component::Normal(_))) && components.next().is_none()
+}
+
+fn is_safe_icon_theme_directory(directory: &str) -> bool {
+    let path = Path::new(directory);
+    !path.as_os_str().is_empty()
+        && path
+            .components()
+            .all(|component| matches!(component, Component::Normal(_)))
 }
 
 fn push_unique<T: PartialEq>(items: &mut Vec<T>, item: T) {
@@ -676,6 +792,86 @@ mod tests {
 
         assert_eq!(resolver.resolve("org.example.Vector").path, Some(svg_path));
         assert!(resolver.png_for_class("org.example.Vector").is_none());
+    }
+
+
+    #[test]
+    fn follows_index_theme_directories_and_inheritance_without_recursing_forever() {
+        let tree = TestTree::new();
+        tree.write(
+            "home/.config/gtk-4.0/settings.ini",
+            b"[Settings]\ngtk-icon-theme-name=Custom\n",
+        );
+        tree.write(
+            "data/icons/Custom/index.theme",
+            b"[Icon Theme]\nDirectories=48x48/apps;\nInherits=Parent;\n[48x48/apps]\nSize=48\nType=Fixed\n",
+        );
+        tree.write(
+            "data/icons/Parent/index.theme",
+            b"[Icon Theme]\nDirectories=scalable/apps;\nInherits=Custom;\n[scalable/apps]\nSize=48\nType=Scalable\n",
+        );
+        let custom_icon = tree.write(
+            "data/icons/Custom/48x48/apps/theme-order.png",
+            b"custom",
+        );
+        tree.write(
+            "data/icons/Parent/scalable/apps/theme-order.png",
+            b"parent",
+        );
+        let inherited_icon = tree.write(
+            "data/icons/Parent/scalable/apps/inherited-only.png",
+            b"parent-only",
+        );
+
+        let resolver = IconResolver::from_paths(
+            Some(tree.0.join("data")),
+            &[],
+            Some(tree.0.join("home")),
+        );
+
+        assert_eq!(
+            resolver.find_icon_path("theme-order").as_deref(),
+            Some(custom_icon.as_path())
+        );
+        assert_eq!(
+            resolver.find_icon_path("inherited-only").as_deref(),
+            Some(inherited_icon.as_path())
+        );
+    }
+
+    #[test]
+    fn rejects_theme_path_traversal_and_falls_back_to_hicolor() {
+        let tree = TestTree::new();
+        tree.write(
+            "home/.config/gtk-4.0/settings.ini",
+            b"[Settings]\ngtk-icon-theme-name=Custom\n",
+        );
+        tree.write(
+            "data/icons/Custom/index.theme",
+            b"[Icon Theme]\nDirectories=../../outside/apps;\nInherits=../outside;\n",
+        );
+        let fallback_icon = tree.write(
+            "data/icons/hicolor/48x48/apps/fallback-only.png",
+            b"hicolor",
+        );
+        tree.write(
+            "data/outside/apps/fallback-only.png",
+            b"must-not-be-followed",
+        );
+
+        let resolver = IconResolver::from_paths(
+            Some(tree.0.join("data")),
+            &[],
+            Some(tree.0.join("home")),
+        );
+
+        assert_eq!(
+            resolver.find_icon_path("fallback-only").as_deref(),
+            Some(fallback_icon.as_path())
+        );
+        assert!(!is_safe_icon_theme_name("../outside"));
+        assert!(!is_safe_icon_theme_directory("../../outside/apps"));
+        assert!(is_safe_icon_theme_directory("scalable/apps"));
     }
 
     #[test]
