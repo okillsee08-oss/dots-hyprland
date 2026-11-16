@@ -3,7 +3,10 @@
 //! This mirrors the data rules in upstream WorkspaceModel.qml while keeping
 //! rendering and Hyprland socket I/O outside the model.
 
-use crate::hyprland_ipc::{Monitor, Workspace};
+use crate::{
+    hyprland_ipc::{Client, Monitor, Workspace},
+    window_inventory::biggest_window_for_workspace,
+};
 
 pub const WORKSPACE_BUTTON_WIDTH: f64 = 26.0;
 pub const WORKSPACE_LEFT_INSET: f64 = 8.0;
@@ -31,6 +34,7 @@ pub struct WorkspaceModel {
     pub active_index: usize,
     pub fake_workspace_id: i64,
     pub slots: Vec<WorkspaceSlot>,
+    pub biggest_windows: Vec<Option<Client>>,
     pub special_workspace_name: Option<String>,
 }
 
@@ -53,6 +57,22 @@ impl WorkspaceModel {
     pub fn from_monitor(
         monitor: &Monitor,
         workspaces: &[Workspace],
+        shown_count: usize,
+        current_workspace_not_fake: bool,
+    ) -> Result<Self, WorkspaceModelError> {
+        Self::from_monitor_with_clients(
+            monitor,
+            workspaces,
+            &[],
+            shown_count,
+            current_workspace_not_fake,
+        )
+    }
+
+    pub fn from_monitor_with_clients(
+        monitor: &Monitor,
+        workspaces: &[Workspace],
+        clients: &[Client],
         shown_count: usize,
         current_workspace_not_fake: bool,
     ) -> Result<Self, WorkspaceModelError> {
@@ -87,6 +107,7 @@ impl WorkspaceModel {
         };
 
         let mut slots = Vec::with_capacity(shown_count);
+        let mut biggest_windows = Vec::with_capacity(shown_count);
         for index in 0..shown_count {
             let offset =
                 i64::try_from(index).map_err(|_| WorkspaceModelError::ShownCountTooLarge)?;
@@ -98,6 +119,7 @@ impl WorkspaceModel {
                 occupied: workspaces.iter().any(|workspace| workspace.id == id),
                 is_fake: id == fake_workspace_id,
             });
+            biggest_windows.push(biggest_window_for_workspace(clients, id).cloned());
         }
 
         let special_workspace_name = monitor
@@ -119,6 +141,7 @@ impl WorkspaceModel {
             active_index,
             fake_workspace_id,
             slots,
+            biggest_windows,
             special_workspace_name,
         })
     }
@@ -141,6 +164,10 @@ impl WorkspaceModel {
 
         let index = ((x - WORKSPACE_LEFT_INSET) / WORKSPACE_BUTTON_WIDTH).floor() as usize;
         (index < self.slots.len()).then_some(index)
+    }
+
+    pub fn biggest_window_at(&self, index: usize) -> Option<&Client> {
+        self.biggest_windows.get(index).and_then(Option::as_ref)
     }
 
     pub fn special_workspace_active(&self) -> bool {
@@ -178,6 +205,41 @@ mod tests {
             name: id.to_string(),
             monitor: "eDP-1".into(),
         }
+    }
+
+    fn client(address: &str, workspace_id: i64, size: [i64; 2]) -> Client {
+        Client {
+            address: address.into(),
+            app_class: "app".into(),
+            title: "window".into(),
+            size,
+            workspace: Some(WorkspaceRef {
+                id: workspace_id,
+                name: workspace_id.to_string(),
+            }),
+        }
+    }
+
+    #[test]
+    fn projects_the_largest_client_for_each_visible_workspace_slot() {
+        let clients = vec![
+            client("0x1", 5, [800, 600]),
+            client("0x2", 5, [1200, 900]),
+            client("0x3", 7, [1920, 1080]),
+        ];
+        let model = WorkspaceModel::from_monitor_with_clients(
+            &monitor(5),
+            &[workspace(5), workspace(7)],
+            &clients,
+            4,
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(model.biggest_window_at(0).unwrap().address, "0x2");
+        assert!(model.biggest_window_at(1).is_none());
+        assert_eq!(model.biggest_window_at(2).unwrap().address, "0x3");
+        assert!(model.biggest_window_at(3).is_none());
     }
 
     #[test]

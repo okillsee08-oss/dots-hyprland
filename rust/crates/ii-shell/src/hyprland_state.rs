@@ -6,7 +6,9 @@
 
 use crate::{
     hyprland_events::HyprlandEvent,
-    hyprland_ipc::{ActiveWindow, Monitor, Snapshot, SpecialWorkspace, Workspace, WorkspaceRef},
+    hyprland_ipc::{
+        ActiveWindow, Client, Monitor, Snapshot, SpecialWorkspace, Workspace, WorkspaceRef,
+    },
 };
 
 const SPECIAL_WORKSPACE_ID: i64 = -99;
@@ -15,6 +17,7 @@ const SPECIAL_WORKSPACE_ID: i64 = -99;
 pub struct HyprlandState {
     pub monitors: Vec<Monitor>,
     pub workspaces: Vec<Workspace>,
+    pub clients: Vec<Client>,
     pub active_window: ActiveWindow,
 }
 
@@ -25,6 +28,7 @@ pub struct StateChange {
     pub refresh_monitors: bool,
     pub refresh_workspaces: bool,
     pub refresh_active_window: bool,
+    pub refresh_clients: bool,
 }
 
 impl From<Snapshot> for HyprlandState {
@@ -32,6 +36,7 @@ impl From<Snapshot> for HyprlandState {
         Self {
             monitors: snapshot.monitors,
             workspaces: snapshot.workspaces,
+            clients: snapshot.clients,
             active_window: snapshot.active_window,
         }
     }
@@ -112,12 +117,14 @@ impl HyprlandState {
                     self.active_window.title.clone_from(title);
                     change.changed = true;
                 }
+                request_clients(&mut change);
             }
             HyprlandEvent::CloseWindow { address } => {
                 if self.active_window.address == *address {
                     self.clear_active_window();
                     change.changed = true;
                 }
+                request_clients(&mut change);
             }
             HyprlandEvent::MonitorAdded { .. } | HyprlandEvent::MonitorAddedV2 { .. } => {
                 request_monitors(&mut change);
@@ -238,16 +245,16 @@ impl HyprlandState {
                 request_monitors(&mut change);
                 request_workspaces(&mut change);
                 change.refresh_active_window = true;
+                request_clients(&mut change);
                 change.changed = true;
             }
-            // These events are either not represented in the current cached
-            // model or belong to the separate window-inventory/layer subsystem.
+            // Window lifecycle, workspace moves and fullscreen geometry can
+            // change the largest client selected for one or more workspaces.
             HyprlandEvent::Fullscreen { .. }
             | HyprlandEvent::OpenWindow { .. }
             | HyprlandEvent::MoveWindow { .. }
-            | HyprlandEvent::MoveWindowV2 { .. }
-            | HyprlandEvent::Submap { .. }
-            | HyprlandEvent::Unknown { .. } => {}
+            | HyprlandEvent::MoveWindowV2 { .. } => request_clients(&mut change),
+            HyprlandEvent::Submap { .. } | HyprlandEvent::Unknown { .. } => {}
         }
 
         change
@@ -376,6 +383,10 @@ fn request_workspaces(change: &mut StateChange) {
     change.refresh_workspaces = true;
 }
 
+fn request_clients(change: &mut StateChange) {
+    change.refresh_clients = true;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -400,6 +411,7 @@ mod tests {
     fn state() -> HyprlandState {
         HyprlandState {
             monitors: vec![monitor(0, "eDP-1", true, 2), monitor(1, "DP-1", false, 7)],
+            clients: Vec::new(),
             workspaces: vec![
                 Workspace {
                     id: 1,
@@ -514,6 +526,7 @@ mod tests {
             title: "Other window".into(),
         });
         assert!(!stale.changed);
+        assert!(stale.refresh_clients);
         assert_eq!(state.active_window.title, "New title");
 
         let focus = state.apply(&HyprlandEvent::ActiveWindowV2 {
@@ -530,6 +543,7 @@ mod tests {
             address: "0xabc".into(),
         });
         assert!(change.changed);
+        assert!(change.refresh_clients);
         assert!(state.active_window.address.is_empty());
         assert!(state.active_window.app_class.is_empty());
     }
@@ -618,11 +632,46 @@ mod tests {
     }
 
     #[test]
+    fn window_inventory_events_request_a_coalesced_client_refresh() {
+        let mut state = state();
+        let events = [
+            HyprlandEvent::OpenWindow {
+                address: "0xdef".into(),
+                workspace: "2".into(),
+                app_class: "terminal".into(),
+                title: "Shell".into(),
+            },
+            HyprlandEvent::MoveWindow {
+                address: "0xdef".into(),
+                workspace: "3".into(),
+            },
+            HyprlandEvent::MoveWindowV2 {
+                address: "0xdef".into(),
+                workspace_id: 3,
+                workspace_name: "3".into(),
+            },
+            HyprlandEvent::WindowTitleV2 {
+                address: "0xdef".into(),
+                title: "Renamed".into(),
+            },
+            HyprlandEvent::Fullscreen { active: true },
+            HyprlandEvent::CloseWindow {
+                address: "0xdef".into(),
+            },
+        ];
+
+        for event in events {
+            assert!(state.apply(&event).refresh_clients);
+        }
+    }
+
+    #[test]
     fn config_reload_requests_a_coalescible_refresh_of_all_cached_domains() {
         let mut state = state();
         let change = state.apply(&HyprlandEvent::ConfigReloaded);
         assert!(change.refresh_monitors);
         assert!(change.refresh_workspaces);
         assert!(change.refresh_active_window);
+        assert!(change.refresh_clients);
     }
 }

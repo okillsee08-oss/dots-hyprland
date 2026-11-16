@@ -44,11 +44,15 @@ impl ShellConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WorkspaceBarConfig {
     pub shown: usize,
+    pub show_app_icons: bool,
 }
 
 impl Default for WorkspaceBarConfig {
     fn default() -> Self {
-        Self { shown: 10 }
+        Self {
+            shown: 10,
+            show_app_icons: true,
+        }
     }
 }
 
@@ -61,16 +65,21 @@ impl WorkspaceBarConfig {
         let Ok(root) = serde_json::from_str::<serde_json::Value>(input) else {
             return Self::default();
         };
-        let Some(shown) = root
+        let shown = root
             .pointer("/bar/workspaces/shown")
             .and_then(serde_json::Value::as_u64)
             .and_then(|value| usize::try_from(value).ok())
             .filter(|value| (1..=Self::MAX_SHOWN).contains(value))
-        else {
-            return Self::default();
-        };
+            .unwrap_or(10);
+        let show_app_icons = root
+            .pointer("/bar/workspaces/showAppIcons")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(true);
 
-        Self { shown }
+        Self {
+            shown,
+            show_app_icons,
+        }
     }
 
     /// Load workspace settings from the existing upstream XDG config path.
@@ -111,6 +120,20 @@ mod tests {
             r#"{"bar":{"workspaces":{"shown":7,"showAppIcons":true}}}"#,
         );
         assert_eq!(config.shown, 7);
+        assert!(config.show_app_icons);
+    }
+
+    #[test]
+    fn reads_the_upstream_app_icon_visibility_toggle() {
+        let enabled = WorkspaceBarConfig::from_upstream_json(
+            r#"{"bar":{"workspaces":{"shown":6,"showAppIcons":true}}}"#,
+        );
+        let disabled = WorkspaceBarConfig::from_upstream_json(
+            r#"{"bar":{"workspaces":{"shown":6,"showAppIcons":false}}}"#,
+        );
+        assert!(enabled.show_app_icons);
+        assert!(!disabled.show_app_icons);
+        assert_eq!(disabled.shown, 6);
     }
 
     #[test]

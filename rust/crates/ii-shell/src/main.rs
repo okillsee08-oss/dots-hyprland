@@ -8,15 +8,17 @@ use std::{
     path::{Path, PathBuf},
     sync::mpsc::{SyncSender, TrySendError, sync_channel},
     thread::{self, JoinHandle},
-    time::Instant,
+    time::{Instant, SystemTime},
 };
 
 use ii_shell::{
+    clock::ClockState,
     config::WorkspaceBarConfig,
-    hyprland_ipc::{HyprlandIpc, WorkspaceCommand, WorkspaceDirection},
+    hyprland_ipc::{ActiveWindow, HyprlandIpc, WorkspaceCommand, WorkspaceDirection},
     hyprland_state::HyprlandState,
+    icon_lookup::IconResolver,
     output_model::PanelGeometry,
-    render, text,
+    render, text, window_presentation,
     workspace_model::WorkspaceModel,
 };
 use smithay_client_toolkit::reexports::client::{
@@ -112,7 +114,9 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let pool = SlotPool::new((INITIAL_WIDTH * PANEL_HEIGHT * 4) as usize, &shm)?;
     let command_worker = HyprlandCommandWorker::spawn()?;
-    let workspace_shown_count = WorkspaceBarConfig::load().shown;
+    let workspace_bar_config = WorkspaceBarConfig::load();
+    let workspace_shown_count = workspace_bar_config.shown;
+    let workspace_show_app_icons = workspace_bar_config.show_app_icons;
     let mut config_watcher = match workspace_config_path() {
         Some(path) => match WorkspaceConfigWatcher::new(&path) {
             Ok(Some(watcher)) => {
@@ -144,9 +148,18 @@ fn main() -> Result<(), Box<dyn Error>> {
         shm,
         pool,
         text: text::TextEngine::new(),
+        icons: IconResolver::from_environment(),
+        clock: ClockState::new(SystemTime::now()),
+        active_window: ActiveWindow {
+            address: String::new(),
+            app_class: String::new(),
+            title: String::new(),
+        },
+        focused_monitor_name: None,
         panels: HashMap::new(),
         workspace_models: HashMap::new(),
         workspace_shown_count,
+        workspace_show_app_icons,
         workspace_models_dirty: false,
         closed: false,
     };
@@ -170,6 +183,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     eprintln!("ii-shell: waiting for Wayland outputs");
     while !shell.closed {
         event_queue.dispatch_pending(&mut shell)?;
+        if shell.clock.refresh(SystemTime::now()) {
+            shell.request_redraw_all(&queue_handle)?;
+        }
         if shell.workspace_models_dirty {
             if let Some(runtime) = hyprland.as_ref() {
                 shell.update_workspace_models(runtime.state());
@@ -206,10 +222,16 @@ fn main() -> Result<(), Box<dyn Error>> {
                 revents: 0,
             },
         ];
-        let poll_timeout_ms = if hyprland.is_none() {
+        let reconnect_timeout_ms = if hyprland.is_none() {
             reconnect.poll_timeout_ms(Instant::now())
         } else {
             -1
+        };
+        let clock_timeout_ms = shell.clock.poll_timeout_ms(SystemTime::now());
+        let poll_timeout_ms = if reconnect_timeout_ms < 0 {
+            clock_timeout_ms
+        } else {
+            reconnect_timeout_ms.min(clock_timeout_ms)
         };
         let ready = unsafe {
             libc::poll(
@@ -304,13 +326,21 @@ fn main() -> Result<(), Box<dyn Error>> {
                 config_watcher = None;
             }
             if reload_config {
-                let next_count = WorkspaceBarConfig::load().shown;
-                if next_count != shell.workspace_shown_count {
+                let next_config = WorkspaceBarConfig::load();
+                let next_count = next_config.shown;
+                let next_show_app_icons = next_config.show_app_icons;
+                if next_count != shell.workspace_shown_count
+                    || next_show_app_icons != shell.workspace_show_app_icons
+                {
                     eprintln!(
-                        "ii-shell: workspace slot count changed from {} to {}",
-                        shell.workspace_shown_count, next_count
+                        "ii-shell: workspace bar config changed (shown: {} -> {}, app icons: {} -> {})",
+                        shell.workspace_shown_count,
+                        next_count,
+                        shell.workspace_show_app_icons,
+                        next_show_app_icons
                     );
                     shell.workspace_shown_count = next_count;
+                    shell.workspace_show_app_icons = next_show_app_icons;
                     if let Some(runtime) = hyprland.as_ref() {
                         shell.update_workspace_models(runtime.state());
                     }
@@ -365,9 +395,14 @@ struct RustShell {
     shm: Shm,
     pool: SlotPool,
     text: text::TextEngine,
+    icons: IconResolver,
+    clock: ClockState,
+    active_window: ActiveWindow,
+    focused_monitor_name: Option<String>,
     panels: HashMap<u32, PanelSurface>,
     workspace_models: HashMap<u32, WorkspaceModel>,
     workspace_shown_count: usize,
+    workspace_show_app_icons: bool,
     workspace_models_dirty: bool,
     closed: bool,
 }
@@ -450,6 +485,12 @@ impl RustShell {
     }
 
     fn update_workspace_models(&mut self, state: &HyprlandState) {
+        self.active_window = state.active_window.clone();
+        self.focused_monitor_name = state
+            .monitors
+            .iter()
+            .find(|monitor| monitor.focused)
+            .map(|monitor| monitor.name.clone());
         self.workspace_models.clear();
         for (&output_id, panel) in &self.panels {
             let Some(monitor) = state
@@ -459,9 +500,10 @@ impl RustShell {
             else {
                 continue;
             };
-            match WorkspaceModel::from_monitor(
+            match WorkspaceModel::from_monitor_with_clients(
                 monitor,
                 &state.workspaces,
+                &state.clients,
                 self.workspace_shown_count,
                 false,
             ) {
@@ -481,6 +523,12 @@ impl RustShell {
 
     fn clear_workspace_models(&mut self) {
         self.workspace_models.clear();
+        self.active_window = ActiveWindow {
+            address: String::new(),
+            app_class: String::new(),
+            title: String::new(),
+        };
+        self.focused_monitor_name = None;
         self.workspace_models_dirty = false;
     }
 
@@ -662,11 +710,25 @@ impl RustShell {
         output_id: u32,
         qh: &QueueHandle<Self>,
     ) -> Result<(), Box<dyn Error>> {
-        let (pool, text, panels, workspace_models) = (
+        let show_app_icons = self.workspace_show_app_icons;
+        let (
+            pool,
+            text,
+            icons,
+            panels,
+            workspace_models,
+            clock,
+            active_window,
+            focused_monitor_name,
+        ) = (
             &mut self.pool,
             &mut self.text,
+            &mut self.icons,
             &mut self.panels,
             &self.workspace_models,
+            &self.clock,
+            &self.active_window,
+            &self.focused_monitor_name,
         );
         let Some(panel) = panels.get_mut(&output_id) else {
             return Ok(());
@@ -694,12 +756,14 @@ impl RustShell {
                 .ok_or("SHM buffer became busy before drawing")?;
             render::draw_panel(pixels, geometry.buffer_width, geometry.buffer_height);
             if let Some(model) = workspace_models.get(&output_id) {
-                render::draw_workspace_strip(
+                render::draw_workspace_strip_with_icons(
                     pixels,
                     geometry.buffer_width,
                     geometry.buffer_height,
                     model,
                     geometry.scale_factor,
+                    Some(icons),
+                    show_app_icons,
                 );
             }
             let scale = geometry.scale_factor as i32;
@@ -732,14 +796,67 @@ impl RustShell {
                 .map_or(20, |model| (8 + model.slots.len() as u32 * 26 + 8) as i32)
                 * scale
                 + special_width;
-            text.draw_text(
-                pixels,
-                geometry.buffer_width,
-                geometry.buffer_height,
-                "illogical impulse · Rust",
-                (title_x, 0),
-                14.0 * scale as f32,
+            let model = workspace_models.get(&output_id);
+            let workspace_id = model.map_or(1, |model| model.active_workspace_id);
+            let biggest_window =
+                model.and_then(|model| model.biggest_window_at(model.active_index));
+            let presentation = window_presentation::for_monitor(
+                active_window,
+                biggest_window,
+                focused_monitor_name.as_deref() == Some(panel.output_name.as_str()),
+                workspace_id,
             );
+            let clock_label = &clock.text().time;
+            let clock_width = (clock_label.chars().count() as u32)
+                .saturating_mul(8)
+                .saturating_mul(scale as u32);
+            let clock_padding = 10u32.saturating_mul(scale as u32);
+            let clock_x = geometry
+                .buffer_width
+                .checked_sub(clock_width.saturating_add(clock_padding))
+                .and_then(|x| i32::try_from(x).ok());
+            let available_right = clock_x.unwrap_or(geometry.buffer_width as i32);
+            let available_width = available_right
+                .saturating_sub(title_x)
+                .saturating_sub(8 * scale)
+                .max(0) as u32;
+            // Approximate glyph widths only to reserve space before the clock;
+            // cosmic-text still clips the final shaped glyph spans to the SHM buffer.
+            let class_limit = (available_width / (6 * scale as u32)).min(48) as usize;
+            let title_limit = (available_width / (7 * scale as u32)).min(96) as usize;
+            if class_limit > 0 {
+                let app_name =
+                    window_presentation::truncate_chars(&presentation.app_name, class_limit);
+                text.draw_text(
+                    pixels,
+                    geometry.buffer_width,
+                    geometry.buffer_height,
+                    &app_name,
+                    (title_x, 2 * scale),
+                    10.0 * scale as f32,
+                );
+            }
+            if title_limit > 0 {
+                let title = window_presentation::truncate_chars(&presentation.title, title_limit);
+                text.draw_text(
+                    pixels,
+                    geometry.buffer_width,
+                    geometry.buffer_height,
+                    &title,
+                    (title_x, 17 * scale),
+                    12.0 * scale as f32,
+                );
+            }
+            if let Some(clock_x) = clock_x {
+                text.draw_text(
+                    pixels,
+                    geometry.buffer_width,
+                    geometry.buffer_height,
+                    clock_label,
+                    (clock_x, 5 * scale),
+                    14.0 * scale as f32,
+                );
+            }
             for pixel in pixels.chunks_exact_mut(4) {
                 pixel.swap(0, 2);
             }
