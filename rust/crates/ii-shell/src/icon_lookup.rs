@@ -248,7 +248,7 @@ impl IconResolver {
         ];
         self.desktop_entries
             .iter()
-            .find(|entry| candidates.iter().any(|id| entry.id == *id))
+            .find(|entry| candidates.contains(&entry.id))
     }
 
     fn desktop_entry_by_wm_class(&self, app_class: &str) -> Option<&DesktopEntry> {
@@ -638,7 +638,7 @@ mod tests {
             "data/icons/hicolor/48x48/apps/my-editor.png",
             b"not-a-png-but-an-existing-icon-file",
         );
-        let mut resolver = IconResolver::from_paths(Some(tree.0.join("data")), &[], None);
+        let resolver = IconResolver::from_paths(Some(tree.0.join("data")), &[], None);
 
         assert_eq!(resolver.guess_icon_name("My App"), "my-app");
         assert_eq!(resolver.guess_icon_name("My_Editor"), "my-editor");
