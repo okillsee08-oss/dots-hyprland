@@ -334,7 +334,6 @@ impl IconResolver {
     }
 }
 
-
 /// Resolve the configured theme, its freedesktop inheritance chain, and the
 /// bounded built-in fallbacks. Theme names and index.theme directory entries
 /// are treated as untrusted path components.
@@ -360,7 +359,11 @@ fn collect_icon_theme_directories(
     let (inherits, mut directories) = read_icon_theme_index(&index_path).unwrap_or_default();
 
     if directories.is_empty() {
-        directories.extend(ICON_SUBDIRECTORIES.iter().map(|directory| directory.to_string()));
+        directories.extend(
+            ICON_SUBDIRECTORIES
+                .iter()
+                .map(|directory| directory.to_string()),
+        );
     }
 
     for directory in directories.into_iter().take(MAX_THEME_DIRECTORIES) {
@@ -409,9 +412,7 @@ fn read_icon_theme_index(path: &Path) -> Option<(Vec<String>, Vec<String>)> {
         };
         match key.trim() {
             "Inherits" => parse_icon_theme_list(value, &mut inherits),
-            "Directories" | "ScaledDirectories" => {
-                parse_icon_theme_list(value, &mut directories)
-            }
+            "Directories" | "ScaledDirectories" => parse_icon_theme_list(value, &mut directories),
             _ => {}
         }
     }
@@ -420,7 +421,11 @@ fn read_icon_theme_index(path: &Path) -> Option<(Vec<String>, Vec<String>)> {
 }
 
 fn parse_icon_theme_list(value: &str, output: &mut Vec<String>) {
-    for item in value.split(';').map(str::trim).filter(|item| !item.is_empty()) {
+    for item in value
+        .split(';')
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+    {
         if item.len() <= 128 {
             push_unique(output, item.to_owned());
         }
@@ -794,7 +799,6 @@ mod tests {
         assert!(resolver.png_for_class("org.example.Vector").is_none());
     }
 
-
     #[test]
     fn follows_index_theme_directories_and_inheritance_without_recursing_forever() {
         let tree = TestTree::new();
@@ -810,24 +814,15 @@ mod tests {
             "data/icons/Parent/index.theme",
             b"[Icon Theme]\nDirectories=scalable/apps;\nInherits=Custom;\n[scalable/apps]\nSize=48\nType=Scalable\n",
         );
-        let custom_icon = tree.write(
-            "data/icons/Custom/48x48/apps/theme-order.png",
-            b"custom",
-        );
-        tree.write(
-            "data/icons/Parent/scalable/apps/theme-order.png",
-            b"parent",
-        );
+        let custom_icon = tree.write("data/icons/Custom/48x48/apps/theme-order.png", b"custom");
+        tree.write("data/icons/Parent/scalable/apps/theme-order.png", b"parent");
         let inherited_icon = tree.write(
             "data/icons/Parent/scalable/apps/inherited-only.png",
             b"parent-only",
         );
 
-        let resolver = IconResolver::from_paths(
-            Some(tree.0.join("data")),
-            &[],
-            Some(tree.0.join("home")),
-        );
+        let resolver =
+            IconResolver::from_paths(Some(tree.0.join("data")), &[], Some(tree.0.join("home")));
 
         assert_eq!(
             resolver.find_icon_path("theme-order").as_deref(),
@@ -859,11 +854,8 @@ mod tests {
             b"must-not-be-followed",
         );
 
-        let resolver = IconResolver::from_paths(
-            Some(tree.0.join("data")),
-            &[],
-            Some(tree.0.join("home")),
-        );
+        let resolver =
+            IconResolver::from_paths(Some(tree.0.join("data")), &[], Some(tree.0.join("home")));
 
         assert_eq!(
             resolver.find_icon_path("fallback-only").as_deref(),
