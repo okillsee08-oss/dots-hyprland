@@ -114,20 +114,10 @@ pub fn draw_workspace_strip_with_icons(
         };
         if let Some(icon) = icon {
             let icon_size = (18.0 * scale).round().max(1.0) as u32;
-            let x = (origin_x
-                + index as f32 * button
-                + (button - icon_size as f32) / 2.0)
-                .round() as u32;
+            let x = (origin_x + index as f32 * button + (button - icon_size as f32) / 2.0).round()
+                as u32;
             let y = (center_y - icon_size as f32 / 2.0).round() as u32;
-            draw_icon(
-                &mut pixmap,
-                icon,
-                x,
-                y,
-                icon_size,
-                width,
-                height,
-            );
+            draw_icon(&mut pixmap, icon, x, y, icon_size, width, height);
         } else {
             let x = origin_x + index as f32 * button + (button - dot) / 2.0;
             let y = center_y - dot / 2.0;
@@ -186,8 +176,7 @@ fn draw_icon(
     for target_y in 0..draw_height {
         let source_y = (target_y as u64 * source.height() as u64 / draw_height as u64) as u32;
         for target_x in 0..draw_width {
-            let source_x =
-                (target_x as u64 * source.width() as u64 / draw_width as u64) as u32;
+            let source_x = (target_x as u64 * source.width() as u64 / draw_width as u64) as u32;
             let source_offset = ((source_y * source.width() + source_x) * 4) as usize;
             let target_offset =
                 (((top + target_y) * destination_width + left + target_x) * 4) as usize;

@@ -14,9 +14,9 @@ use std::{
 use ii_shell::{
     clock::ClockState,
     config::WorkspaceBarConfig,
-    icon_lookup::IconResolver,
     hyprland_ipc::{ActiveWindow, HyprlandIpc, WorkspaceCommand, WorkspaceDirection},
     hyprland_state::HyprlandState,
+    icon_lookup::IconResolver,
     output_model::PanelGeometry,
     render, text, window_presentation,
     workspace_model::WorkspaceModel,
@@ -711,7 +711,16 @@ impl RustShell {
         qh: &QueueHandle<Self>,
     ) -> Result<(), Box<dyn Error>> {
         let show_app_icons = self.workspace_show_app_icons;
-        let (pool, text, icons, panels, workspace_models, clock, active_window, focused_monitor_name) = (
+        let (
+            pool,
+            text,
+            icons,
+            panels,
+            workspace_models,
+            clock,
+            active_window,
+            focused_monitor_name,
+        ) = (
             &mut self.pool,
             &mut self.text,
             &mut self.icons,

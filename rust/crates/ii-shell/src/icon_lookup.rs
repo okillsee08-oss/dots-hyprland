@@ -72,7 +72,12 @@ impl IconResolver {
             .or_else(|| home.as_ref().map(|path| path.join(".local/share")));
         let data_dirs = env::var_os("XDG_DATA_DIRS")
             .map(|value| env::split_paths(&value).collect::<Vec<_>>())
-            .unwrap_or_else(|| vec![PathBuf::from("/usr/local/share"), PathBuf::from("/usr/share")]);
+            .unwrap_or_else(|| {
+                vec![
+                    PathBuf::from("/usr/local/share"),
+                    PathBuf::from("/usr/share"),
+                ]
+            });
 
         Self::from_paths(data_home, &data_dirs, home)
     }
@@ -123,10 +128,7 @@ impl IconResolver {
         for base in icon_bases {
             for theme in &themes {
                 for subdirectory in ICON_SUBDIRECTORIES {
-                    push_unique(
-                        &mut icon_directories,
-                        base.join(theme).join(subdirectory),
-                    );
+                    push_unique(&mut icon_directories, base.join(theme).join(subdirectory));
                 }
             }
         }
@@ -134,10 +136,7 @@ impl IconResolver {
             push_unique(&mut icon_directories, root.join("pixmaps"));
         }
         if let Some(home) = home {
-            push_unique(
-                &mut icon_directories,
-                home.join(".local/share/pixmaps"),
-            );
+            push_unique(&mut icon_directories, home.join(".local/share/pixmaps"));
         }
 
         Self {
@@ -383,10 +382,7 @@ fn scan_desktop_entries(applications: &Path, entries: &mut Vec<DesktopEntry>) {
                 continue;
             }
             if !file_type.is_file()
-                || path
-                    .extension()
-                    .and_then(|extension| extension.to_str())
-                    != Some("desktop")
+                || path.extension().and_then(|extension| extension.to_str()) != Some("desktop")
             {
                 continue;
             }
@@ -441,9 +437,9 @@ fn parse_desktop_entry(root: &Path, path: &Path) -> Option<DesktopEntry> {
         return None;
     }
     let icon = icon.filter(|value| !value.is_empty())?;
-    let name = name.filter(|value| !value.is_empty()).unwrap_or_else(|| {
-        id.strip_suffix(".desktop").unwrap_or(&id).to_owned()
-    });
+    let name = name
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| id.strip_suffix(".desktop").unwrap_or(&id).to_owned());
 
     Some(DesktopEntry {
         id,
@@ -495,9 +491,8 @@ fn fuzzy_score(query: &str, candidate: &str) -> f32 {
         return 0.0;
     }
     if candidate.contains(&query) {
-        return 1.0 - (candidate.len().saturating_sub(query.len()) as f32
-            / candidate.len() as f32)
-            * 0.2;
+        return 1.0
+            - (candidate.len().saturating_sub(query.len()) as f32 / candidate.len() as f32) * 0.2;
     }
 
     let candidate_chars = candidate.chars().collect::<Vec<_>>();
@@ -509,10 +504,11 @@ fn fuzzy_score(query: &str, candidate: &str) -> f32 {
     let mut cursor = 0usize;
     let mut gaps = 0usize;
     for character in &query_chars {
-        let Some(offset) = candidate_chars
-            .get(cursor..)
-            .and_then(|remaining| remaining.iter().position(|candidate| candidate == character))
-        else {
+        let Some(offset) = candidate_chars.get(cursor..).and_then(|remaining| {
+            remaining
+                .iter()
+                .position(|candidate| candidate == character)
+        }) else {
             return 0.0;
         };
         gaps += offset;
@@ -533,11 +529,7 @@ fn load_bounded_png(path: &Path) -> Option<Pixmap> {
     }
     let width = u32::from_be_bytes(bytes.get(16..20)?.try_into().ok()?);
     let height = u32::from_be_bytes(bytes.get(20..24)?.try_into().ok()?);
-    if width == 0
-        || height == 0
-        || width > MAX_ICON_DIMENSION
-        || height > MAX_ICON_DIMENSION
-    {
+    if width == 0 || height == 0 || width > MAX_ICON_DIMENSION || height > MAX_ICON_DIMENSION {
         return None;
     }
     Pixmap::decode_png(&bytes).ok()
@@ -622,19 +614,13 @@ mod tests {
     #[test]
     fn applies_upstream_normal_and_regex_substitutions() {
         let resolver = IconResolver::empty();
-        assert_eq!(
-            resolver.guess_icon_name("Code"),
-            "visual-studio-code"
-        );
+        assert_eq!(resolver.guess_icon_name("Code"), "visual-studio-code");
         assert_eq!(resolver.guess_icon_name("footclient"), "foot");
         assert_eq!(
             resolver.guess_icon_name("steam_app_12345"),
             "steam_icon_12345"
         );
-        assert_eq!(
-            resolver.guess_icon_name("Minecraft 1.21"),
-            "minecraft"
-        );
+        assert_eq!(resolver.guess_icon_name("Minecraft 1.21"), "minecraft");
         assert_eq!(
             resolver.guess_icon_name("gcr.prompter"),
             "system-lock-screen"
@@ -652,8 +638,7 @@ mod tests {
             "data/icons/hicolor/48x48/apps/my-editor.png",
             b"not-a-png-but-an-existing-icon-file",
         );
-        let mut resolver =
-            IconResolver::from_paths(Some(tree.0.join("data")), &[], None);
+        let mut resolver = IconResolver::from_paths(Some(tree.0.join("data")), &[], None);
 
         assert_eq!(resolver.guess_icon_name("My App"), "my-app");
         assert_eq!(resolver.guess_icon_name("My_Editor"), "my-editor");
@@ -687,8 +672,7 @@ mod tests {
             "data/icons/hicolor/scalable/apps/vector-app.svg",
             b"<svg xmlns=\"http://www.w3.org/2000/svg\"/>",
         );
-        let mut resolver =
-            IconResolver::from_paths(Some(tree.0.join("data")), &[], None);
+        let mut resolver = IconResolver::from_paths(Some(tree.0.join("data")), &[], None);
 
         assert_eq!(resolver.resolve("org.example.Vector").path, Some(svg_path));
         assert!(resolver.png_for_class("org.example.Vector").is_none());
