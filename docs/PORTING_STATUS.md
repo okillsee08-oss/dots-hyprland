@@ -3,7 +3,7 @@
 **Branch:** `rust-port/phase-0`  
 **Upstream:** `end-4/dots-hyprland`  
 **Reference revision at port start:** `2f2a376fdb2ad738bf55f693dd0b474b64bb0ab8`  
-**Latest upstream inspected (2026-11-15):** `21733c3ca7f4edc20faafedea844dc96002c6f7f`
+**Latest upstream inspected (2026-11-16):** `21733c3ca7f4edc20faafedea844dc96002c6f7f`
 
 ## What is being ported
 
@@ -20,7 +20,7 @@ This Rust project replaces the graphical shell/runtime incrementally. It does no
 - [x] Render into the Wayland SHM slot using tiny-skia, avoiding an intermediate full-frame pixmap.
 - [x] Add cosmic-text system-font shaping/rasterization using one shared font system/cache.
 - [x] Add a shared session-bus connection boundary with zbus.
-- [x] Add JSON config model and basic unit tests.
+- [x] Add JSON config model and basic unit tests, including read-only parsing of the upstream workspace app-icon visibility toggle.
 - [x] Add GitHub Actions checks for formatting, compilation, tests, and Clippy.
 - [ ] Run the first build/test on a real NixOS/Hyprland machine. GitHub source edits cannot prove compositor compatibility or runtime RSS.
 - [x] Add a bounded Hyprland command-socket adapter with typed monitor/workspace/window/client queries and validated workspace dispatch, plus parser/path-validation tests.
@@ -55,7 +55,7 @@ This Rust project replaces the graphical shell/runtime incrementally. It does no
 
 Port and test one subsystem at a time:
 
-1. Top bar: per-output surfaces, workspace grouping/occupancy model, native workspace indicators, pointer input, workspace switching, local clock, focused-monitor active-window presentation, and largest-window-per-workspace projection are implemented. Each output renders the configured number of 26 px slots (default 10), a 22 px active marker, connected occupied pills, compact occupied/empty dots, and a labeled pill for an active special workspace; it supports left-click focus, vertical relative-workspace switching, and back-button special-workspace toggling. The focused output shows the active Hyprland app class/title when its workspace has a client; other outputs show the largest client in their active workspace. Each visible workspace slot now exposes its largest client for icon rendering. Remaining work includes app icon lookup/rendering, rounded/animated rendering, keyboard/shortcut handling, right-click overview, configurable/localized date and clock popup, system tray, battery, network, volume, media, notifications and resource indicators.
+1. Top bar: per-output surfaces, workspace grouping/occupancy model, native workspace indicators, pointer input, workspace switching, local clock, focused-monitor active-window presentation, and largest-window-per-workspace projection are implemented. Each output renders the configured number of 26 px slots (default 10), a 22 px active marker, connected occupied pills, compact occupied/empty dots, and a labeled pill for an active special workspace; it supports left-click focus, vertical relative-workspace switching, and back-button special-workspace toggling. The focused output shows the active Hyprland app class/title when its workspace has a client; other outputs show the largest client in their active workspace. Each visible workspace slot now exposes its largest client for icon rendering. Remaining work includes SVG/XPM rasterization, icon-theme inheritance and live theme-change detection, upstream monochrome/colorizer effects, rounded/animated rendering, keyboard/shortcut handling, right-click overview, configurable/localized date and clock popup, system tray, battery, network, volume, media, notifications and resource indicators.
 2. Quick settings and sidebars: toggles, device status, controls, search and settings launch.
 3. Overview and window management: foreign-toplevel tracking, previews only on demand, workspace movement.
 4. Dock and app launcher: `.desktop` indexing, fuzzy search, activation and pinned apps.
@@ -163,3 +163,16 @@ Hard constraints:
 - No local Rust toolchain is available in this hosted editing environment. GitHub Actions [run #60](https://github.com/okillsee08-oss/dots-hyprland/actions/runs/43727760151) for commit `5b2c3eb11933dc4dffd2270337e2031f9f6790bc` passed Format, Check, Test, and Clippy. The test step passed 76 workspace tests plus 3 config-watcher tests (79 total). Runs #56–#58 exposed formatting differences; run #59 passed Format and Check but caught three render-test fixtures missing the new workspace-model field. Those issues were corrected before run #60.
 
 - No NixOS/Hyprland compositor session or RSS/performance benchmark was available; live runtime behavior and measured memory efficiency remain unverified.
+
+
+## Latest implementation update (2026-11-16)
+
+- Rechecked the Rust branch head at `93e89c7f6e79262e2598fce362550a326ddde560`; it is 18 commits ahead of fork `main` and zero behind. The latest upstream `end-4/dots-hyprland` head remains `21733c3ca7f4edc20faafedea844dc96002c6f7f` (2026-11-15); the November 13–15 upstream commits since the prior merge are Gentoo packaging/revision updates, with no newer QML behavior changes.
+- Inspected upstream `AppSearch.qml`, `Workspaces.qml`, and `Config.qml`. The reference checks desktop-entry IDs, explicit and regex substitutions, installed icon existence, normalized names, fuzzy desktop icon/name matches, and heuristic desktop-entry lookup. `Workspaces.qml` passes the largest workspace client's class into `AppSearch.guessIcon` and `Quickshell.iconPath`; `Config.qml` defaults `bar.workspaces.showAppIcons` to true.
+- Added `icon_lookup.rs`: indexes bounded XDG desktop-entry roots, resolves `StartupWMClass` and desktop IDs, mirrors the principal AppSearch substitutions and fallback stages, and searches the configured GTK theme plus common fallback themes and pixmaps.
+- Added lazy PNG decoding and compositing directly into the existing reusable tiny-skia/Wayland SHM buffer. The cache is capped at 128 entries; icon files are limited to 4 MiB and 512 × 512 pixels before decoding. No extra worker, timer, D-Bus connection, or dependency was introduced.
+- Added read-only parsing and live reload for `bar.workspaces.showAppIcons` through the existing config watcher. Disabling the setting restores the occupancy-dot presentation.
+- SVG and XPM icon paths can be resolved but are not rasterized; those slots continue to show their occupancy dot. Upstream monochrome/colorizer effects, full icon-theme inheritance and theme-change watching remain pending.
+- Added tests for desktop ID and StartupWMClass lookup, normal and regex substitutions, normalized and fuzzy lookup, theme path selection, PNG decode/cache behavior, oversized PNG rejection, and direct rendering into the caller-owned panel buffer.
+- GitHub Actions [run #63](https://github.com/okillsee08-oss/dots-hyprland/actions/runs/43908601639) for commit `93e89c7f6e79262e2598fce362550a326ddde560` passed Format, Check, Test, and Clippy. The test step passed 84 Rust tests plus 3 config-watcher tests (87 total). Run #61 initially failed at Format; run #62 passed Format, Check and Test but Clippy found one manual-contains warning and one unnecessary mutability warning. Both were fixed before run #63.
+- The hosted editing environment has no local `rustc` or `cargo`, so the four commands could not be run locally; GitHub Actions executed the checks. No NixOS/Hyprland compositor session, output-hotplug test, or RSS/PSS/CPU benchmark was available. Runtime compatibility and measured memory improvement remain unverified.

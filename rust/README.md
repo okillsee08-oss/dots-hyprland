@@ -38,7 +38,8 @@ The Hyprland compositor remains responsible for windows and composition. This pr
 - `crates/ii-shell/src/clock.rs`: local-time clock snapshot with minute/second precision and a poll-loop deadline aligned to the next clock boundary.
 - `crates/ii-shell/src/window_presentation.rs`: focused-monitor active app/title projection and largest-workspace-window fallback for other outputs, with safe label truncation.
 - `crates/ii-shell/src/window_inventory.rs`: pure largest-area client selection per workspace, preserving upstream tie behavior.
-- `crates/ii-shell/src/config.rs`: versionable shell settings model and read-only parsing of the upstream `bar.workspaces.shown` option from `~/.config/illogical-impulse/config.json`; `ii-shell` watches that file's parent directory with inotify and reloads the workspace count through its existing poll loop.
+- `crates/ii-shell/src/icon_lookup.rs`: XDG desktop-entry and icon-theme lookup, AppSearch-style class guessing, bounded PNG decoding and a 128-entry lazy icon cache.
+- `crates/ii-shell/src/config.rs`: versionable shell settings model and read-only parsing of upstream `bar.workspaces.shown` and `bar.workspaces.showAppIcons` options from `~/.config/illogical-impulse/config.json`; `ii-shell` watches that file's parent directory with inotify and reloads both settings through its existing poll loop.
 - `crates/ii-shell/src/output_model.rs`: checked logical-to-buffer geometry for output-bound panels.
 - `crates/ii-shell/src/hyprland_ipc.rs`: bounded typed Hyprland monitor/workspace/active-window/client queries and validated workspace dispatch.
 - `crates/ii-shell/src/workspace_model.rs`: per-monitor workspace grouping, occupancy projection, largest-client projection for each visible slot, and logical-coordinate pointer hit testing.
@@ -56,7 +57,7 @@ cargo test --manifest-path rust/Cargo.toml --workspace
 cargo run --manifest-path rust/Cargo.toml -p ii-shell
 ```
 
-The executable creates one top-panel layer surface per advertised Wayland output. A single poll(2) loop waits on the Wayland display and Hyprland broadcast socket together. One bounded worker receives workspace commands from Wayland pointer callbacks and performs short, fresh Hyprland command-socket requests outside the display loop; it is shared by all outputs and never spawned per widget. It uses EventQueue::prepare_read() before sleeping and dispatches Wayland callbacks after the display fd is readable. Hyprland refreshes are coalesced after event batches. Each panel requests a Wayland frame callback and queues at most one follow-up redraw; a queued paint is retried after frame callbacks and buffer-release dispatches, without a repaint timer. The event stream reconnects after startup failures and disconnects with bounded exponential backoff (250 ms to 30 s), using the existing poll loop rather than a timer thread. The same poll timeout wakes at the next minute boundary for the local clock; panels redraw only when the formatted time changes. The runtime snapshots `j/clients` alongside monitor/workspace/active-window data and coalesces client-list refreshes after window open/close/move/title/fullscreen events. The focused output shows the active Hyprland app class and title when its workspace has a client; other outputs show the largest-area client in their active workspace. Each visible workspace slot also exposes its largest client for the upcoming app-icon renderer. Command-socket refreshes are still synchronous and bounded by the IPC adapter timeout; asynchronous refresh I/O remains outstanding. This is an early-stage shell, not a complete desktop replacement.
+The executable creates one top-panel layer surface per advertised Wayland output. A single poll(2) loop waits on the Wayland display and Hyprland broadcast socket together. One bounded worker receives workspace commands from Wayland pointer callbacks and performs short, fresh Hyprland command-socket requests outside the display loop; it is shared by all outputs and never spawned per widget. It uses EventQueue::prepare_read() before sleeping and dispatches Wayland callbacks after the display fd is readable. Hyprland refreshes are coalesced after event batches. Each panel requests a Wayland frame callback and queues at most one follow-up redraw; a queued paint is retried after frame callbacks and buffer-release dispatches, without a repaint timer. The event stream reconnects after startup failures and disconnects with bounded exponential backoff (250 ms to 30 s), using the existing poll loop rather than a timer thread. The same poll timeout wakes at the next minute boundary for the local clock; panels redraw only when the formatted time changes. The runtime snapshots `j/clients` alongside monitor/workspace/active-window data and coalesces client-list refreshes after window open/close/move/title/fullscreen events. The focused output shows the active Hyprland app class and title when its workspace has a client; other outputs show the largest-area client in their active workspace. Each visible workspace slot exposes its largest client; the bar resolves its class through the XDG desktop entries and configured icon theme, then draws cached PNG icons directly into the reusable SHM buffer when available. Command-socket refreshes are still synchronous and bounded by the IPC adapter timeout; asynchronous refresh I/O remains outstanding. This is an early-stage shell, not a complete desktop replacement.
 
 ## Memory rules
 
@@ -67,7 +68,7 @@ The executable creates one top-panel layer surface per advertised Wayland output
 - Keep rendering event-driven. No permanent animation timer or polling loop for unchanged state.
 - Use one session-bus connection shared by service adapters. Avoid one D-Bus connection/thread per widget.
 - Keep heavyweight features (AI, image/video processing, previews) out of the always-running base process; spawn them on demand.
-- Keep buffers, caches, histories and notification queues bounded.
+- Keep buffers, caches, histories and notification queues bounded. The workspace PNG cache is capped at 128 icons; icon files are limited to 4 MiB and 512 × 512 pixels before decoding.
 - Measure RSS, allocations, wakeups, frame time, and buffer count on the same machine as the upstream shell. Do not claim a memory win without measurements.
 
 ## Porting rule
@@ -79,9 +80,10 @@ Existing QML remains the behavioral reference until the corresponding native sub
 
 The workspace-slot watcher observes the existing `~/.config/illogical-impulse`
 directory with inotify and is registered in the same blocking event loop as
-Wayland and Hyprland. It reloads only `bar.workspaces.shown`; the upstream
-configuration remains read-only. The parent directory must exist when the
-shell starts. If it is created later, restart the shell to arm the watch.
+Wayland and Hyprland. It reloads `bar.workspaces.shown` and
+`bar.workspaces.showAppIcons`; the upstream configuration remains read-only.
+The parent directory must exist when the shell starts. If it is created later,
+restart the shell to arm the watch.
 
 
 ## Clock behavior
@@ -92,3 +94,25 @@ long-date string. The next minute boundary is folded into the existing
 Wayland/Hyprland/config `poll(2)` wait; no timer thread or periodic polling
 loop is added. The popup, user-configurable Qt locale formats, localized
 weekday names, and optional verbose date display remain parity work.
+
+
+## Workspace app icon behavior
+
+The native workspace bar now reads the upstream `bar.workspaces.showAppIcons`
+setting (default `true`) and reloads it through the existing inotify watcher.
+At startup, the resolver indexes up to 2,048 desktop entries from
+`XDG_DATA_HOME/applications` and `XDG_DATA_DIRS/applications`, including
+desktop IDs and `StartupWMClass`. Its class-to-icon fallback follows the
+useful lookup order in upstream `AppSearch.qml`: desktop ID, explicit
+substitutions, Steam/Minecraft/polkit patterns, direct and normalized names,
+then fuzzy desktop icon/name matches.
+
+The resolver checks the configured GTK icon theme first, followed by
+hicolor/Adwaita/Papirus/Breeze and pixmaps. PNG files are decoded lazily and
+cached; the cache holds at most 128 entries, and input files are bounded to
+4 MiB and 512 × 512 pixels before decoding. Rendering composites the PNG
+directly into the existing panel buffer and adds no thread or image service.
+SVG and XPM paths can be found, but are not rasterized yet; those slots keep
+their occupancy dot. The upstream monochrome/colorizer effects and automatic
+icon-theme-change detection remain outstanding. Restart the shell after
+changing the system icon theme.
