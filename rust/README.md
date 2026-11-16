@@ -38,7 +38,7 @@ The Hyprland compositor remains responsible for windows and composition. This pr
 - `crates/ii-shell/src/clock.rs`: local-time clock snapshot with minute/second precision and a poll-loop deadline aligned to the next clock boundary.
 - `crates/ii-shell/src/window_presentation.rs`: focused-monitor active app/title projection and largest-workspace-window fallback for other outputs, with safe label truncation.
 - `crates/ii-shell/src/window_inventory.rs`: pure largest-area client selection per workspace, preserving upstream tie behavior.
-- `crates/ii-shell/src/icon_lookup.rs`: XDG desktop-entry and icon-theme lookup, AppSearch-style class guessing, bounded PNG decoding and a 128-entry lazy icon cache.
+- `crates/ii-shell/src/icon_lookup.rs`: XDG desktop-entry and icon-theme lookup, AppSearch-style class guessing, bounded `index.theme` inheritance, path-safe directory resolution, bounded PNG decoding and a 128-entry lazy icon cache.
 - `crates/ii-shell/src/config.rs`: versionable shell settings model and read-only parsing of upstream `bar.workspaces.shown` and `bar.workspaces.showAppIcons` options from `~/.config/illogical-impulse/config.json`; `ii-shell` watches that file's parent directory with inotify and reloads both settings through its existing poll loop.
 - `crates/ii-shell/src/output_model.rs`: checked logical-to-buffer geometry for output-bound panels.
 - `crates/ii-shell/src/hyprland_ipc.rs`: bounded typed Hyprland monitor/workspace/active-window/client queries and validated workspace dispatch.
@@ -107,11 +107,17 @@ useful lookup order in upstream `AppSearch.qml`: desktop ID, explicit
 substitutions, Steam/Minecraft/polkit patterns, direct and normalized names,
 then fuzzy desktop icon/name matches.
 
-The resolver checks the configured GTK icon theme first, followed by
-hicolor/Adwaita/Papirus/Breeze and pixmaps. PNG files are decoded lazily and
-cached; the cache holds at most 128 entries, and input files are bounded to
-4 MiB and 512 × 512 pixels before decoding. Rendering composites the PNG
-directly into the existing panel buffer and adds no thread or image service.
+The resolver reads bounded freedesktop `index.theme` files and follows
+the configured theme's declared `Inherits` chain in priority order, using its
+`Directories` and `ScaledDirectories` rather than assuming every theme uses
+the same directory layout. It rejects path traversal and inheritance cycles;
+index files, theme count, inheritance depth, per-theme directories, and total
+search directories all have explicit limits. Missing or unusable index files
+fall back to the common icon directory layout, then hicolor/Adwaita/Papirus/
+Breeze and pixmaps. PNG files are decoded lazily and cached; the cache holds at
+most 128 entries, and input files are bounded to 4 MiB and 512 × 512 pixels
+before decoding. Rendering composites the PNG directly into the existing panel
+buffer and adds no thread or image service.
 SVG and XPM paths can be found, but are not rasterized yet; those slots keep
 their occupancy dot. The upstream monochrome/colorizer effects and automatic
 icon-theme-change detection remain outstanding. Restart the shell after
