@@ -14,6 +14,7 @@ use std::{
 use ii_shell::{
     clock::ClockState,
     config::WorkspaceBarConfig,
+    icon_lookup::IconResolver,
     hyprland_ipc::{ActiveWindow, HyprlandIpc, WorkspaceCommand, WorkspaceDirection},
     hyprland_state::HyprlandState,
     output_model::PanelGeometry,
@@ -113,7 +114,9 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let pool = SlotPool::new((INITIAL_WIDTH * PANEL_HEIGHT * 4) as usize, &shm)?;
     let command_worker = HyprlandCommandWorker::spawn()?;
-    let workspace_shown_count = WorkspaceBarConfig::load().shown;
+    let workspace_bar_config = WorkspaceBarConfig::load();
+    let workspace_shown_count = workspace_bar_config.shown;
+    let workspace_show_app_icons = workspace_bar_config.show_app_icons;
     let mut config_watcher = match workspace_config_path() {
         Some(path) => match WorkspaceConfigWatcher::new(&path) {
             Ok(Some(watcher)) => {
@@ -145,6 +148,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         shm,
         pool,
         text: text::TextEngine::new(),
+        icons: IconResolver::from_environment(),
         clock: ClockState::new(SystemTime::now()),
         active_window: ActiveWindow {
             address: String::new(),
@@ -155,6 +159,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         panels: HashMap::new(),
         workspace_models: HashMap::new(),
         workspace_shown_count,
+        workspace_show_app_icons,
         workspace_models_dirty: false,
         closed: false,
     };
@@ -321,13 +326,21 @@ fn main() -> Result<(), Box<dyn Error>> {
                 config_watcher = None;
             }
             if reload_config {
-                let next_count = WorkspaceBarConfig::load().shown;
-                if next_count != shell.workspace_shown_count {
+                let next_config = WorkspaceBarConfig::load();
+                let next_count = next_config.shown;
+                let next_show_app_icons = next_config.show_app_icons;
+                if next_count != shell.workspace_shown_count
+                    || next_show_app_icons != shell.workspace_show_app_icons
+                {
                     eprintln!(
-                        "ii-shell: workspace slot count changed from {} to {}",
-                        shell.workspace_shown_count, next_count
+                        "ii-shell: workspace bar config changed (shown: {} -> {}, app icons: {} -> {})",
+                        shell.workspace_shown_count,
+                        next_count,
+                        shell.workspace_show_app_icons,
+                        next_show_app_icons
                     );
                     shell.workspace_shown_count = next_count;
+                    shell.workspace_show_app_icons = next_show_app_icons;
                     if let Some(runtime) = hyprland.as_ref() {
                         shell.update_workspace_models(runtime.state());
                     }
@@ -382,12 +395,14 @@ struct RustShell {
     shm: Shm,
     pool: SlotPool,
     text: text::TextEngine,
+    icons: IconResolver,
     clock: ClockState,
     active_window: ActiveWindow,
     focused_monitor_name: Option<String>,
     panels: HashMap<u32, PanelSurface>,
     workspace_models: HashMap<u32, WorkspaceModel>,
     workspace_shown_count: usize,
+    workspace_show_app_icons: bool,
     workspace_models_dirty: bool,
     closed: bool,
 }
@@ -695,9 +710,11 @@ impl RustShell {
         output_id: u32,
         qh: &QueueHandle<Self>,
     ) -> Result<(), Box<dyn Error>> {
-        let (pool, text, panels, workspace_models, clock, active_window, focused_monitor_name) = (
+        let show_app_icons = self.workspace_show_app_icons;
+        let (pool, text, icons, panels, workspace_models, clock, active_window, focused_monitor_name) = (
             &mut self.pool,
             &mut self.text,
+            &mut self.icons,
             &mut self.panels,
             &self.workspace_models,
             &self.clock,
@@ -730,12 +747,14 @@ impl RustShell {
                 .ok_or("SHM buffer became busy before drawing")?;
             render::draw_panel(pixels, geometry.buffer_width, geometry.buffer_height);
             if let Some(model) = workspace_models.get(&output_id) {
-                render::draw_workspace_strip(
+                render::draw_workspace_strip_with_icons(
                     pixels,
                     geometry.buffer_width,
                     geometry.buffer_height,
                     model,
                     geometry.scale_factor,
+                    Some(icons),
+                    show_app_icons,
                 );
             }
             let scale = geometry.scale_factor as i32;

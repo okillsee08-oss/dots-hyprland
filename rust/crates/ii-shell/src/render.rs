@@ -1,6 +1,6 @@
-use tiny_skia::{Color, Paint, PixmapMut, Rect, Transform};
+use tiny_skia::{Color, Paint, Pixmap, PixmapMut, Rect, Transform};
 
-use crate::workspace_model::WorkspaceModel;
+use crate::{icon_lookup::IconResolver, workspace_model::WorkspaceModel};
 
 /// Draws the idle panel background and a restrained accent marker into a
 /// caller-owned Wayland SHM buffer. No intermediate full-frame allocation.
@@ -19,17 +19,29 @@ pub fn draw_panel(pixels: &mut [u8], width: u32, height: u32) {
     pixmap.fill_rect(rect, &paint, Transform::identity(), None);
 }
 
-/// Draws the first native workspace strip for one output.
-///
-/// The sizing follows upstream Workspaces.qml (26 logical px per slot and a
-/// 22 px active indicator). Application icons remain a follow-up; active
-/// special workspaces receive a compact label pill after the normal slots.
+/// Draws the native workspace strip without an icon resolver. This wrapper
+/// keeps simple renderer callers and tests independent of host icon themes.
 pub fn draw_workspace_strip(
     pixels: &mut [u8],
     width: u32,
     height: u32,
     model: &WorkspaceModel,
     scale: u32,
+) {
+    draw_workspace_strip_with_icons(pixels, width, height, model, scale, None, true);
+}
+
+/// Draws the workspace strip and, when available, small PNG app icons.
+/// SVG/XPM names are still resolved by IconResolver but fall back to the
+/// occupancy dot until a low-overhead vector rasterizer is selected.
+pub fn draw_workspace_strip_with_icons(
+    pixels: &mut [u8],
+    width: u32,
+    height: u32,
+    model: &WorkspaceModel,
+    scale: u32,
+    mut icons: Option<&mut IconResolver>,
+    show_app_icons: bool,
 ) {
     if scale == 0 || model.slots.is_empty() {
         return;
@@ -87,20 +99,47 @@ pub fn draw_workspace_strip(
         );
     }
 
-    // In the default upstream config, app icons are shown and workspace
-    // numbers are hidden; their compact dot indicators remain visible.
+    // The upstream default enables app icons. Use a bounded cached PNG when
+    // one is available; otherwise preserve the occupied/empty dot indicator.
     let dot = 5.0 * scale;
     for (index, slot) in model.slots.iter().enumerate() {
-        let x = origin_x + index as f32 * button + (button - dot) / 2.0;
-        let y = center_y - dot / 2.0;
-        let color = if index == model.active_index {
-            Color::from_rgba8(255, 245, 245, 255)
-        } else if slot.visibly_occupied() {
-            Color::from_rgba8(224, 219, 220, 255)
+        let icon = if show_app_icons {
+            model.biggest_window_at(index).and_then(|client| {
+                icons
+                    .as_deref_mut()
+                    .and_then(|resolver| resolver.png_for_class(&client.app_class))
+            })
         } else {
-            Color::from_rgba8(125, 119, 120, 255)
+            None
         };
-        fill_rect(&mut pixmap, x, y, dot, dot, color);
+        if let Some(icon) = icon {
+            let icon_size = (18.0 * scale).round().max(1.0) as u32;
+            let x = (origin_x
+                + index as f32 * button
+                + (button - icon_size as f32) / 2.0)
+                .round() as u32;
+            let y = (center_y - icon_size as f32 / 2.0).round() as u32;
+            draw_icon(
+                &mut pixmap,
+                icon,
+                x,
+                y,
+                icon_size,
+                width,
+                height,
+            );
+        } else {
+            let x = origin_x + index as f32 * button + (button - dot) / 2.0;
+            let y = center_y - dot / 2.0;
+            let color = if index == model.active_index {
+                Color::from_rgba8(255, 245, 245, 255)
+            } else if slot.visibly_occupied() {
+                Color::from_rgba8(224, 219, 220, 255)
+            } else {
+                Color::from_rgba8(125, 119, 120, 255)
+            };
+            fill_rect(&mut pixmap, x, y, dot, dot, color);
+        }
     }
 
     if let Some(name) = model.special_workspace_name.as_deref() {
@@ -113,6 +152,60 @@ pub fn draw_workspace_strip(
             active,
             Color::from_rgba8(178, 83, 93, 255),
         );
+    }
+}
+
+/// Draw a cached premultiplied RGBA icon into the caller-owned panel buffer.
+/// Nearest-neighbor scaling keeps this tiny 18 px marker allocation-free.
+fn draw_icon(
+    destination: &mut PixmapMut<'_>,
+    source: &Pixmap,
+    x: u32,
+    y: u32,
+    size: u32,
+    destination_width: u32,
+    destination_height: u32,
+) {
+    if size == 0 || source.width() == 0 || source.height() == 0 {
+        return;
+    }
+
+    let fit = size as f32 / source.width().max(source.height()) as f32;
+    let draw_width = (source.width() as f32 * fit).round().max(1.0) as u32;
+    let draw_height = (source.height() as f32 * fit).round().max(1.0) as u32;
+    let left = x + (size.saturating_sub(draw_width)) / 2;
+    let top = y + (size.saturating_sub(draw_height)) / 2;
+    let draw_width = draw_width.min(destination_width.saturating_sub(left));
+    let draw_height = draw_height.min(destination_height.saturating_sub(top));
+    if draw_width == 0 || draw_height == 0 {
+        return;
+    }
+
+    let source_pixels = source.data();
+    let destination_pixels = destination.data_mut();
+    for target_y in 0..draw_height {
+        let source_y = (target_y as u64 * source.height() as u64 / draw_height as u64) as u32;
+        for target_x in 0..draw_width {
+            let source_x =
+                (target_x as u64 * source.width() as u64 / draw_width as u64) as u32;
+            let source_offset = ((source_y * source.width() + source_x) * 4) as usize;
+            let target_offset =
+                (((top + target_y) * destination_width + left + target_x) * 4) as usize;
+            let alpha = source_pixels[source_offset + 3] as u32;
+            let inverse_alpha = 255 - alpha;
+
+            for channel in 0..3 {
+                let source_channel = source_pixels[source_offset + channel] as u32;
+                let target_channel = destination_pixels[target_offset + channel] as u32;
+                destination_pixels[target_offset + channel] = source_channel
+                    .saturating_add((target_channel * inverse_alpha + 127) / 255)
+                    .min(255) as u8;
+            }
+            let target_alpha = destination_pixels[target_offset + 3] as u32;
+            destination_pixels[target_offset + 3] = alpha
+                .saturating_add((target_alpha * inverse_alpha + 127) / 255)
+                .min(255) as u8;
+        }
     }
 }
 
@@ -234,6 +327,22 @@ mod tests {
             special_workspace_width("a very long special workspace", 1),
             142
         );
+    }
+
+    #[test]
+    fn draws_a_cached_icon_into_the_existing_workspace_buffer() {
+        let width = 40u32;
+        let height = 36u32;
+        let mut source = Pixmap::new(2, 2).unwrap();
+        source.fill(Color::from_rgba8(220, 40, 50, 255));
+        let mut pixels = vec![0; (width * height * 4) as usize];
+        {
+            let mut destination = PixmapMut::from_bytes(&mut pixels, width, height).unwrap();
+            draw_icon(&mut destination, &source, 11, 9, 18, width, height);
+        }
+
+        let offset = ((18 * width + 20) * 4) as usize;
+        assert_eq!(&pixels[offset..offset + 4], &[220, 40, 50, 255]);
     }
 
     #[test]
