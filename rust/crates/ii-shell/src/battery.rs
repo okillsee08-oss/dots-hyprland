@@ -105,10 +105,7 @@ pub struct BatterySnapshot {
 }
 
 impl BatterySnapshot {
-    pub fn from_upower(
-        properties: UPowerBatteryProperties,
-        thresholds: BatteryThresholds,
-    ) -> Self {
+    pub fn from_upower(properties: UPowerBatteryProperties, thresholds: BatteryThresholds) -> Self {
         let state = DeviceState::from(properties.state);
         let available =
             properties.device_type == UPOWER_DEVICE_TYPE_BATTERY && properties.power_supply;
@@ -121,16 +118,13 @@ impl BatterySnapshot {
             _ => 0.0,
         };
 
-        let health_percent = battery_health_percent(
-            properties.energy_full,
-            properties.energy_full_design,
-        );
+        let health_percent =
+            battery_health_percent(properties.energy_full, properties.energy_full_design);
         let time_to_empty_seconds = positive_seconds(properties.time_to_empty_seconds);
         let time_to_full_seconds = positive_seconds(properties.time_to_full_seconds);
 
         let is_charging = state == DeviceState::Charging;
-        let is_plugged_in =
-            is_charging || state == DeviceState::PendingCharge;
+        let is_plugged_in = is_charging || state == DeviceState::PendingCharge;
         let percent = percentage * 100.0;
 
         let is_low = available && percent <= f64::from(thresholds.low_percent);
@@ -219,7 +213,10 @@ fn positive_seconds(value: i64) -> Option<u64> {
     u64::try_from(value).ok().filter(|seconds| *seconds > 0)
 }
 
-fn battery_health_percent(energy_full: Option<f64>, energy_full_design: Option<f64>) -> Option<f64> {
+fn battery_health_percent(
+    energy_full: Option<f64>,
+    energy_full_design: Option<f64>,
+) -> Option<f64> {
     let full = energy_full.filter(|value| value.is_finite() && *value >= 0.0)?;
     let design = energy_full_design.filter(|value| value.is_finite() && *value > 0.0)?;
     let health = full / design * 100.0;
@@ -273,8 +270,7 @@ mod tests {
         input.state = DeviceState::Charging as u32;
         input.energy_rate_w = 18.0;
         input.time_to_full_seconds = 1_800;
-        let charging =
-            BatterySnapshot::from_upower(input, BatteryThresholds::default());
+        let charging = BatterySnapshot::from_upower(input, BatteryThresholds::default());
 
         assert!(charging.is_charging);
         assert!(charging.is_plugged_in);
@@ -282,8 +278,7 @@ mod tests {
         assert_eq!(charging.estimated_time_seconds(), Some(1_800));
 
         input.state = DeviceState::PendingCharge as u32;
-        let pending =
-            BatterySnapshot::from_upower(input, BatteryThresholds::default());
+        let pending = BatterySnapshot::from_upower(input, BatteryThresholds::default());
         assert!(!pending.is_charging);
         assert!(pending.is_plugged_in);
         assert_eq!(pending.change_rate_w, 0.0);
@@ -296,8 +291,7 @@ mod tests {
     fn pending_discharge_is_not_reported_as_plugged_in() {
         let mut input = properties();
         input.state = DeviceState::PendingDischarge as u32;
-        let snapshot =
-            BatterySnapshot::from_upower(input, BatteryThresholds::default());
+        let snapshot = BatterySnapshot::from_upower(input, BatteryThresholds::default());
 
         assert!(!snapshot.is_charging);
         assert!(!snapshot.is_plugged_in);
@@ -308,8 +302,7 @@ mod tests {
     fn applies_upstream_low_critical_suspend_and_full_defaults() {
         let mut input = properties();
         input.percentage_percent = 4.0;
-        let snapshot =
-            BatterySnapshot::from_upower(input, BatteryThresholds::default());
+        let snapshot = BatterySnapshot::from_upower(input, BatteryThresholds::default());
 
         assert!(snapshot.is_low);
         assert!(snapshot.is_critical);
@@ -324,8 +317,7 @@ mod tests {
     fn automatic_suspend_is_only_a_state_flag_and_respects_config() {
         let mut input = properties();
         input.percentage_percent = 2.0;
-        let enabled =
-            BatterySnapshot::from_upower(input, BatteryThresholds::default());
+        let enabled = BatterySnapshot::from_upower(input, BatteryThresholds::default());
         assert!(enabled.is_suspending);
         assert!(enabled.should_automatic_suspend);
 
@@ -345,8 +337,7 @@ mod tests {
         let mut input = properties();
         input.state = DeviceState::Charging as u32;
         input.percentage_percent = 2.0;
-        let snapshot =
-            BatterySnapshot::from_upower(input, BatteryThresholds::default());
+        let snapshot = BatterySnapshot::from_upower(input, BatteryThresholds::default());
 
         assert!(snapshot.is_low);
         assert!(!snapshot.is_low_and_not_charging);
@@ -372,16 +363,14 @@ mod tests {
     fn ignores_non_battery_and_non_power_supply_devices() {
         let mut input = properties();
         input.device_type = 1;
-        let non_battery =
-            BatterySnapshot::from_upower(input, BatteryThresholds::default());
+        let non_battery = BatterySnapshot::from_upower(input, BatteryThresholds::default());
         assert!(!non_battery.available);
         assert!(!non_battery.is_low);
         assert!(!non_battery.should_automatic_suspend);
 
         input.device_type = UPOWER_DEVICE_TYPE_BATTERY;
         input.power_supply = false;
-        let peripheral =
-            BatterySnapshot::from_upower(input, BatteryThresholds::default());
+        let peripheral = BatterySnapshot::from_upower(input, BatteryThresholds::default());
         assert!(!peripheral.available);
     }
 
@@ -390,16 +379,14 @@ mod tests {
         let mut input = properties();
         input.percentage_percent = f64::NAN;
         input.energy_rate_w = f64::INFINITY;
-        let snapshot =
-            BatterySnapshot::from_upower(input, BatteryThresholds::default());
+        let snapshot = BatterySnapshot::from_upower(input, BatteryThresholds::default());
 
         assert_eq!(snapshot.percentage, 0.0);
         assert_eq!(snapshot.change_rate_w, 0.0);
 
         input.percentage_percent = 150.0;
         input.energy_rate_w = -8.0;
-        let snapshot =
-            BatterySnapshot::from_upower(input, BatteryThresholds::default());
+        let snapshot = BatterySnapshot::from_upower(input, BatteryThresholds::default());
         assert_eq!(snapshot.percentage, 1.0);
         // EnergyRate is a magnitude in UPower; the direction comes from State.
         assert_eq!(snapshot.change_rate_w, -8.0);
@@ -412,8 +399,7 @@ mod tests {
         input.energy_full_design = Some(0.0);
         input.time_to_empty_seconds = -1;
         input.time_to_full_seconds = 0;
-        let snapshot =
-            BatterySnapshot::from_upower(input, BatteryThresholds::default());
+        let snapshot = BatterySnapshot::from_upower(input, BatteryThresholds::default());
 
         assert_eq!(snapshot.health_percent, None);
         assert_eq!(snapshot.time_to_empty_seconds, None);
@@ -426,8 +412,7 @@ mod tests {
         let mut input = properties();
         input.energy_full = Some(0.0);
         input.energy_full_design = Some(50.0);
-        let snapshot =
-            BatterySnapshot::from_upower(input, BatteryThresholds::default());
+        let snapshot = BatterySnapshot::from_upower(input, BatteryThresholds::default());
         assert_eq!(snapshot.health_percent, Some(0.01));
     }
 
@@ -447,8 +432,7 @@ mod tests {
             (100.0, BatteryIconLevel::Full),
         ] {
             input.percentage_percent = percent;
-            let snapshot =
-                BatterySnapshot::from_upower(input, BatteryThresholds::default());
+            let snapshot = BatterySnapshot::from_upower(input, BatteryThresholds::default());
             assert_eq!(snapshot.icon_level(), expected, "{percent}%");
         }
     }
