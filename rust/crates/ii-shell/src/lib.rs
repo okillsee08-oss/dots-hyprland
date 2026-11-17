@@ -1,3 +1,4 @@
+pub mod battery;
 pub mod bus;
 pub mod clock;
 pub mod config;

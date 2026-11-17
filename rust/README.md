@@ -35,6 +35,7 @@ The Hyprland compositor remains responsible for windows and composition. This pr
 - `crates/ii-shell/src/render.rs`: software rendering primitives.
 - `crates/ii-shell/src/text.rs`: a shared cosmic-text font system and glyph cache.
 - `crates/ii-shell/src/bus.rs`: shared D-Bus session connection boundary.
+- `crates/ii-shell/src/battery.rs`: pure UPower battery-state projection, upstream threshold and icon-level mapping, health/time-estimate normalization, and edge-case tests; it performs no D-Bus I/O or power actions.
 - `crates/ii-shell/src/clock.rs`: local-time clock snapshot with minute/second precision and a poll-loop deadline aligned to the next clock boundary.
 - `crates/ii-shell/src/window_presentation.rs`: focused-monitor active app/title projection and largest-workspace-window fallback for other outputs, with safe label truncation.
 - `crates/ii-shell/src/window_inventory.rs`: pure largest-area client selection per workspace, preserving upstream tie behavior.
@@ -122,3 +123,20 @@ SVG and XPM paths can be found, but are not rasterized yet; those slots keep
 their occupancy dot. The upstream monochrome/colorizer effects and automatic
 icon-theme-change detection remain outstanding. Restart the shell after
 changing the system icon theme.
+
+
+## Battery state model
+
+The battery projection in `crates/ii-shell/src/battery.rs` is a pure model
+of the upstream `Battery.qml`, `BatteryIndicator.qml`, `BatteryPopup.qml`,
+`Icons.qml`, and battery defaults in `common/Config.qml`. It converts
+UPower's 0–100 percentage into the 0.0–1.0 fraction used by Quickshell,
+derives charging/plugged-in and low/critical/suspend/full flags, applies the
+same battery icon thresholds, and exposes positive time estimates only when
+UPower reports them. Battery health is derived from full versus design energy
+when both values are valid.
+
+The model does not connect to D-Bus, send notifications or sounds, or execute
+suspend actions. Those effects remain outside the state projection until the
+shared session-bus event path is implemented and tested. No battery service
+thread or additional dependency is introduced by this model.
