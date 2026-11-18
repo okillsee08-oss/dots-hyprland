@@ -145,10 +145,11 @@ reads all device fields with one `Properties.GetAll` call, and installs a
 filtered `PropertiesChanged` subscription before emitting its initial snapshot.
 It refreshes the full immutable snapshot after each relevant signal, so
 invalidated or omitted changed properties cannot leave the model partially
-updated. The adapter adds no connection, thread, timer, or polling loop.
+updated. The adapter itself adds no connection, worker thread, timer, or polling loop. The current zbus async-io backend still owns its internal executor; integrating or measuring that runtime overhead remains part of the D-Bus event-loop work.
 
 The adapter is not yet connected to the shell's blocking Wayland/Hyprland
-`poll(2)` loop or panel renderer. The next integration step is a bounded,
+`poll(2)` loop or panel renderer. The current async-io connection backend's
+internal executor overhead has not been measured or removed. The next integration step is a bounded,
 latest-value handoff from the shared D-Bus executor into the shell event loop.
 Notifications, sounds, and automatic-suspend actions remain intentionally
 unimplemented until their user-configurable behavior and safety checks are

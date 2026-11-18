@@ -118,7 +118,6 @@ impl UPowerAdapter {
         on_update(self.snapshot_with_proxy(&properties, thresholds).await?);
 
         while let Some(message) = signals.next().await {
-            let message = message?;
             let (interface, _changed, _invalidated): (
                 String,
                 HashMap<String, OwnedValue>,
