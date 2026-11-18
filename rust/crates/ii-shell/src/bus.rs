@@ -8,3 +8,12 @@ use zbus::Connection;
 pub async fn connect_session() -> zbus::Result<Connection> {
     Connection::session().await
 }
+
+
+/// Creates the process-wide system-bus connection.
+///
+/// UPower and other machine-level services live on the system bus. Pass clones
+/// of this connection to their adapters; do not open one connection per widget.
+pub async fn connect_system() -> zbus::Result<Connection> {
+    Connection::system().await
+}
