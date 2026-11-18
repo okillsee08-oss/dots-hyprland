@@ -13,9 +13,7 @@ use zbus::{
     zvariant::{OwnedObjectPath, OwnedValue},
 };
 
-use crate::battery::{
-    BatterySnapshot, BatteryThresholds, UPowerBatteryProperties,
-};
+use crate::battery::{BatterySnapshot, BatteryThresholds, UPowerBatteryProperties};
 
 pub const UPOWER_DESTINATION: &str = "org.freedesktop.UPower";
 pub const UPOWER_MANAGER_PATH: &str = "/org/freedesktop/UPower";
@@ -58,8 +56,7 @@ impl UPowerAdapter {
             UPOWER_MANAGER_INTERFACE,
         )
         .await?;
-        let display_device: OwnedObjectPath =
-            manager.call("GetDisplayDevice", &()).await?;
+        let display_device: OwnedObjectPath = manager.call("GetDisplayDevice", &()).await?;
 
         Ok(Self {
             connection: connection.clone(),
@@ -113,18 +110,12 @@ impl UPowerAdapter {
         )
         .await?;
         let mut signals = properties
-            .receive_signal_with_args(
-                "PropertiesChanged",
-                &[(0, UPOWER_DEVICE_INTERFACE)],
-            )
+            .receive_signal_with_args("PropertiesChanged", &[(0, UPOWER_DEVICE_INTERFACE)])
             .await?;
 
         // Subscribe first, then read the initial snapshot. Any change racing
         // with GetAll remains queued and is followed by another full snapshot.
-        on_update(
-            self.snapshot_with_proxy(&properties, thresholds)
-                .await?,
-        );
+        on_update(self.snapshot_with_proxy(&properties, thresholds).await?);
 
         while let Some(message) = signals.next().await {
             let message = message?;
@@ -135,10 +126,7 @@ impl UPowerAdapter {
             ) = message.body().deserialize()?;
 
             if interface == UPOWER_DEVICE_INTERFACE {
-                on_update(
-                    self.snapshot_with_proxy(&properties, thresholds)
-                        .await?,
-                );
+                on_update(self.snapshot_with_proxy(&properties, thresholds).await?);
             }
         }
 
