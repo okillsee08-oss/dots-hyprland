@@ -272,7 +272,7 @@ mod tests {
             events: libc::POLLIN,
             revents: 0,
         };
-        unsafe { libc::poll(&mut descriptor, 1, 0) } > 0
+        (unsafe { libc::poll(&mut descriptor, 1, 0) }) > 0
             && descriptor.revents & libc::POLLIN != 0
     }
 
