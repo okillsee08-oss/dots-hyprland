@@ -4,7 +4,7 @@
 
 1. Preserve the original repository's Hyprland configuration, setup scripts, assets, and license.
 2. Replace the Quickshell UI/runtime with a native Rust Linux desktop shell.
-3. Keep the runtime small and idle-friendly: one Wayland connection, one shared D-Bus session connection, bounded/reused SHM buffers, shared font caches, one panel per output, no per-widget threads, one bounded Hyprland command worker, and redraw only when state changes.
+3. Keep the runtime small and idle-friendly: one Wayland connection, one shared system-bus connection and one shared session-bus connection, bounded/reused SHM buffers, shared font caches, one panel per output, no per-widget threads, one bounded Hyprland command worker, one shared UPower monitor worker, and redraw only when state changes.
 4. Port behavior by subsystem and verify parity before retiring any QML implementation.
 
 ## Runtime layers
@@ -38,6 +38,7 @@ The Hyprland compositor remains responsible for windows and composition. This pr
 - `crates/ii-shell/src/battery.rs`: pure UPower battery-state projection, upstream threshold and icon-level mapping, health/time-estimate normalization, and edge-case tests; it performs no D-Bus I/O or power actions.
 - `crates/ii-shell/src/bus.rs`: shared system- and session-bus connection constructors; adapters receive shared connection handles rather than opening per-widget connections.
 - `crates/ii-shell/src/upower.rs`: asynchronous UPower system-bus adapter using `GetDisplayDevice`, one `Properties.GetAll` snapshot, and a filtered `PropertiesChanged` stream; it creates no connection or worker thread.
+- `crates/ii-shell/src/battery_runtime.rs`: one bounded UPower worker with a latest-snapshot mailbox and Linux eventfd wakeup, allowing the blocking Wayland/Hyprland loop to consume updates without D-Bus work or an unbounded queue.
 - `crates/ii-shell/src/clock.rs`: local-time clock snapshot with minute/second precision and a poll-loop deadline aligned to the next clock boundary.
 - `crates/ii-shell/src/window_presentation.rs`: focused-monitor active app/title projection and largest-workspace-window fallback for other outputs, with safe label truncation.
 - `crates/ii-shell/src/window_inventory.rs`: pure largest-area client selection per workspace, preserving upstream tie behavior.
@@ -69,7 +70,7 @@ The executable creates one top-panel layer surface per advertised Wayland output
 - Drop/rebuild only the affected output's buffer pair when its logical geometry or integer scale changes.
 - Paint directly into SHM slots with tiny-skia; avoid an intermediate full-frame heap pixmap.
 - Keep rendering event-driven. No permanent animation timer or polling loop for unchanged state.
-- Share one system-bus connection among system-service adapters (such as UPower) and one session-bus connection among session-service adapters (such as MPRIS and notifications). Avoid one D-Bus connection or worker thread per widget.
+- Share one system-bus connection among system-service adapters (such as UPower) and one session-bus connection among session-service adapters (such as MPRIS and notifications). The current UPower bridge uses one bounded process-wide worker and eventfd mailbox; avoid one D-Bus connection or worker thread per widget.
 - Keep heavyweight features (AI, image/video processing, previews) out of the always-running base process; spawn them on demand.
 - Keep buffers, caches, histories and notification queues bounded. The workspace PNG cache is capped at 128 icons; icon files are limited to 4 MiB and 512 × 512 pixels before decoding.
 - Measure RSS, allocations, wakeups, frame time, and buffer count on the same machine as the upstream shell. Do not claim a memory win without measurements.
@@ -147,10 +148,23 @@ It refreshes the full immutable snapshot after each relevant signal, so
 invalidated or omitted changed properties cannot leave the model partially
 updated. The adapter itself adds no connection, worker thread, timer, or polling loop. The current zbus async-io backend still owns its internal executor; integrating or measuring that runtime overhead remains part of the D-Bus event-loop work.
 
-The adapter is not yet connected to the shell's blocking Wayland/Hyprland
-`poll(2)` loop or panel renderer. The current async-io connection backend's
-internal executor overhead has not been measured or removed. The next integration step is a bounded,
-latest-value handoff from the shared D-Bus executor into the shell event loop.
+The runtime now starts one named UPower monitor worker. It owns the
+shared system-bus connection, retries connection/device failures with bounded
+backoff (250 ms to 30 s), and publishes snapshots into a single
+`Mutex<Option<BatterySnapshot>>` slot. A nonblocking Linux eventfd wakes the
+existing Wayland/Hyprland `poll(2)` loop; multiple property changes coalesce
+to the newest snapshot rather than building a queue. The UI thread only drains
+the eventfd and copies the latest immutable snapshot, then redraws panels when
+the value actually changes. The current panel displays the available battery
+percentage beside the clock and reserves title space to avoid overlap.
+
+This bridge uses one additional process-wide D-Bus worker thread, not one
+thread per widget. The worker can be stopped and joined during shell shutdown.
+The zbus async-io backend's internal executor overhead has not been measured
+or removed. The indicator is currently a percentage label rather than the
+upstream clipped progress bar/bolt treatment; battery thresholds still use
+upstream defaults rather than the full user configuration parser.
 Notifications, sounds, and automatic-suspend actions remain intentionally
 unimplemented until their user-configurable behavior and safety checks are
-ported.
+ported. No live UPower service, NixOS/Hyprland compositor, or memory/wakeup
+benchmark has been exercised in this hosted run.
