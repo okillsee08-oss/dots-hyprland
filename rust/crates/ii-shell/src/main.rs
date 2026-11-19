@@ -876,8 +876,9 @@ impl RustShell {
                 let reserved = i32::try_from(battery_width.saturating_add(clock_padding)).ok()?;
                 x.checked_sub(reserved)
             });
-            let available_right =
-                battery_x.or(clock_x).unwrap_or(geometry.buffer_width as i32);
+            let available_right = battery_x
+                .or(clock_x)
+                .unwrap_or(geometry.buffer_width as i32);
             let available_width = available_right
                 .saturating_sub(title_x)
                 .saturating_sub(8 * scale)
