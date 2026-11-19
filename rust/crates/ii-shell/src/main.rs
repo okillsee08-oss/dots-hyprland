@@ -872,7 +872,7 @@ impl RustShell {
                     .saturating_mul(7)
                     .saturating_mul(scale as u32)
             });
-            let battery_x = battery_label.as_ref().and_then(|_| clock_x).and_then(|x| {
+            let battery_x = battery_label.as_ref().and(clock_x).and_then(|x| {
                 let reserved = i32::try_from(battery_width.saturating_add(clock_padding)).ok()?;
                 x.checked_sub(reserved)
             });
