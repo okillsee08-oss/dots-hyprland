@@ -62,8 +62,9 @@ impl Default for BatteryThresholds {
 /// The subset of UPower device properties needed by the native battery model.
 ///
 /// `percentage_percent` and `energy_rate_w` use UPower's D-Bus units:
-/// percentage is 0..=100, while energy rate is a non-negative magnitude in W.
-/// UPower reports charging direction separately through `state`.
+/// percentage is 0..=100, while energy rate is in W (positive when
+/// discharging and negative when charging). The snapshot converts this to
+/// Quickshell's opposite-signed `changeRate` convention.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct UPowerBatteryProperties {
     pub device_type: u32,

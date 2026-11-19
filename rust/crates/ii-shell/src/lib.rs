@@ -1,4 +1,5 @@
 pub mod battery;
+pub mod battery_runtime;
 pub mod bus;
 pub mod clock;
 pub mod config;
@@ -7,6 +8,7 @@ pub mod icon_lookup;
 pub mod output_model;
 pub mod render;
 pub mod text;
+pub mod upower;
 pub mod window_inventory;
 pub mod window_presentation;
 pub mod workspace_model;
