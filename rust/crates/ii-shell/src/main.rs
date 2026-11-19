@@ -12,6 +12,8 @@ use std::{
 };
 
 use ii_shell::{
+    battery::{BatterySnapshot, BatteryThresholds},
+    battery_runtime::BatteryMonitorWorker,
     clock::ClockState,
     config::WorkspaceBarConfig,
     hyprland_ipc::{ActiveWindow, HyprlandIpc, WorkspaceCommand, WorkspaceDirection},
@@ -160,8 +162,20 @@ fn main() -> Result<(), Box<dyn Error>> {
         workspace_models: HashMap::new(),
         workspace_shown_count,
         workspace_show_app_icons,
+        battery_snapshot: None,
         workspace_models_dirty: false,
         closed: false,
+    };
+
+    let mut battery_monitor = match BatteryMonitorWorker::spawn(BatteryThresholds::default()) {
+        Ok(monitor) => {
+            eprintln!("ii-shell: started shared UPower battery monitor");
+            Some(monitor)
+        }
+        Err(error) => {
+            eprintln!("ii-shell: battery monitor could not start: {error}");
+            None
+        }
     };
 
     let mut reconnect = ii_shell::hyprland_runtime::ReconnectBackoff::default();
@@ -218,6 +232,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                 fd: config_watcher
                     .as_ref()
                     .map_or(-1, |watcher| watcher.as_raw_fd()),
+                events: libc::POLLIN,
+                revents: 0,
+            },
+            libc::pollfd {
+                fd: battery_monitor
+                    .as_ref()
+                    .map_or(-1, |monitor| monitor.as_raw_fd()),
                 events: libc::POLLIN,
                 revents: 0,
             },
@@ -349,6 +370,32 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         }
 
+        let battery_ready =
+            descriptors[3].revents & (libc::POLLIN | libc::POLLERR | libc::POLLHUP) != 0;
+        if battery_ready {
+            let mut monitor_failed = false;
+            if let Some(monitor) = battery_monitor.as_ref() {
+                match monitor.take_latest() {
+                    Ok(Some(snapshot)) => {
+                        if shell.battery_snapshot != Some(snapshot) {
+                            shell.battery_snapshot = Some(snapshot);
+                            shell.request_redraw_all(&queue_handle)?;
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        eprintln!("ii-shell: battery snapshot handoff failed: {error}");
+                        monitor_failed = true;
+                    }
+                }
+            }
+            if monitor_failed {
+                battery_monitor = None;
+                shell.battery_snapshot = None;
+                shell.request_redraw_all(&queue_handle)?;
+            }
+        }
+
         if hyprland.is_none() && reconnect.is_due(Instant::now()) {
             match ii_shell::hyprland_runtime::HyprlandRuntime::connect_from_environment() {
                 Ok(runtime) => {
@@ -403,6 +450,7 @@ struct RustShell {
     workspace_models: HashMap<u32, WorkspaceModel>,
     workspace_shown_count: usize,
     workspace_show_app_icons: bool,
+    battery_snapshot: Option<BatterySnapshot>,
     workspace_models_dirty: bool,
     closed: bool,
 }
@@ -711,6 +759,7 @@ impl RustShell {
         qh: &QueueHandle<Self>,
     ) -> Result<(), Box<dyn Error>> {
         let show_app_icons = self.workspace_show_app_icons;
+        let battery_snapshot = self.battery_snapshot;
         let (
             pool,
             text,
@@ -815,7 +864,20 @@ impl RustShell {
                 .buffer_width
                 .checked_sub(clock_width.saturating_add(clock_padding))
                 .and_then(|x| i32::try_from(x).ok());
-            let available_right = clock_x.unwrap_or(geometry.buffer_width as i32);
+            let battery_label = battery_snapshot
+                .filter(|snapshot| snapshot.available)
+                .map(|snapshot| format!("{:.0}%", snapshot.percentage * 100.0));
+            let battery_width = battery_label.as_ref().map_or(0, |label| {
+                (label.chars().count() as u32)
+                    .saturating_mul(7)
+                    .saturating_mul(scale as u32)
+            });
+            let battery_x = battery_label.as_ref().and_then(|_| clock_x).and_then(|x| {
+                let reserved = i32::try_from(battery_width.saturating_add(clock_padding)).ok()?;
+                x.checked_sub(reserved)
+            });
+            let available_right =
+                battery_x.or(clock_x).unwrap_or(geometry.buffer_width as i32);
             let available_width = available_right
                 .saturating_sub(title_x)
                 .saturating_sub(8 * scale)
@@ -845,6 +907,16 @@ impl RustShell {
                     &title,
                     (title_x, 17 * scale),
                     12.0 * scale as f32,
+                );
+            }
+            if let (Some(label), Some(battery_x)) = (battery_label.as_deref(), battery_x) {
+                text.draw_text(
+                    pixels,
+                    geometry.buffer_width,
+                    geometry.buffer_height,
+                    label,
+                    (battery_x, 5 * scale),
+                    11.0 * scale as f32,
                 );
             }
             if let Some(clock_x) = clock_x {
