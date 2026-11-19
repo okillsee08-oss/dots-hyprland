@@ -12,12 +12,12 @@ use std::{
     time::{Duration, Instant},
 };
 
-use futures_lite::future;
 use crate::{
     battery::{BatterySnapshot, BatteryThresholds},
     bus,
     upower::UPowerAdapter,
 };
+use futures_lite::future;
 
 const INITIAL_RETRY: Duration = Duration::from_millis(250);
 const MAX_RETRY: Duration = Duration::from_secs(30);
@@ -272,8 +272,7 @@ mod tests {
             events: libc::POLLIN,
             revents: 0,
         };
-        (unsafe { libc::poll(&mut descriptor, 1, 0) }) > 0
-            && descriptor.revents & libc::POLLIN != 0
+        (unsafe { libc::poll(&mut descriptor, 1, 0) }) > 0 && descriptor.revents & libc::POLLIN != 0
     }
 
     #[test]
@@ -299,18 +298,12 @@ mod tests {
         let mailbox = SnapshotMailbox::new().unwrap();
 
         mailbox.publish(snapshot(40.0));
-        assert_eq!(
-            mailbox.take_latest().unwrap().unwrap().percentage,
-            0.40
-        );
+        assert_eq!(mailbox.take_latest().unwrap().unwrap().percentage, 0.40);
         assert!(!is_readable(mailbox.as_raw_fd()));
 
         mailbox.publish(snapshot(41.0));
         assert!(is_readable(mailbox.as_raw_fd()));
-        assert_eq!(
-            mailbox.take_latest().unwrap().unwrap().percentage,
-            0.41
-        );
+        assert_eq!(mailbox.take_latest().unwrap().unwrap().percentage, 0.41);
         assert!(!is_readable(mailbox.as_raw_fd()));
     }
 }
