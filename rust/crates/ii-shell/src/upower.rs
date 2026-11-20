@@ -296,7 +296,6 @@ mod tests {
     }
 }
 
-
 #[cfg(all(test, target_os = "linux"))]
 mod dbus_integration_tests {
     use super::*;
@@ -450,10 +449,7 @@ mod dbus_integration_tests {
                 .unwrap()
                 .serve_at(UPOWER_MANAGER_PATH, MockManager)
                 .unwrap()
-                .serve_at(
-                    DISPLAY_DEVICE_PATH,
-                    MockDevice(Arc::clone(&device_state)),
-                )
+                .serve_at(DISPLAY_DEVICE_PATH, MockDevice(Arc::clone(&device_state)))
                 .unwrap()
                 .build()
                 .await
@@ -472,12 +468,10 @@ mod dbus_integration_tests {
             let (stop_tx, stop_rx) = async_channel::bounded::<()>(1);
             let monitor_adapter = adapter.clone();
             let monitor = thread::spawn(move || {
-                let run = monitor_adapter.run_monitor(
-                    BatteryThresholds::default(),
-                    move |snapshot| {
+                let run =
+                    monitor_adapter.run_monitor(BatteryThresholds::default(), move |snapshot| {
                         let _ = updates_tx.send(snapshot);
-                    },
-                );
+                    });
                 let stop = async move {
                     let _ = stop_rx.recv().await;
                     Ok::<(), UPowerError>(())
@@ -500,7 +494,10 @@ mod dbus_integration_tests {
                 state.energy_rate = -8.5;
             }
             let changed = HashMap::from([
-                ("State".to_owned(), OwnedValue::from(DeviceState::Charging as u32)),
+                (
+                    "State".to_owned(),
+                    OwnedValue::from(DeviceState::Charging as u32),
+                ),
                 ("Percentage".to_owned(), OwnedValue::from(41.0_f64)),
                 ("EnergyRate".to_owned(), OwnedValue::from(-8.5_f64)),
             ]);
@@ -549,7 +546,9 @@ mod dbus_integration_tests {
             assert_eq!(refreshed.percentage, 0.38);
             assert_eq!(refreshed.state, DeviceState::Charging);
 
-            stop_tx.try_send(()).expect("monitor stop signal should queue");
+            stop_tx
+                .try_send(())
+                .expect("monitor stop signal should queue");
             assert!(monitor.join().expect("monitor thread should join").is_ok());
 
             drop(adapter);
