@@ -324,9 +324,10 @@ mod dbus_integration_tests {
                 .stdout(Stdio::piped())
                 .stderr(Stdio::null())
                 .spawn()?;
-            let stdout = child.stdout.take().ok_or_else(|| {
-                io::Error::other("dbus-daemon stdout was not piped")
-            })?;
+            let stdout = child
+                .stdout
+                .take()
+                .ok_or_else(|| io::Error::other("dbus-daemon stdout was not piped"))?;
             let mut reader = BufReader::new(stdout);
             let mut address = String::new();
             match reader.read_line(&mut address) {
