@@ -295,3 +295,267 @@ mod tests {
         assert!(decode_device_properties(&values).is_ok());
     }
 }
+
+#[cfg(all(test, target_os = "linux"))]
+mod dbus_integration_tests {
+    use super::*;
+    use crate::battery::DeviceState;
+    use futures_lite::future;
+    use std::{
+        io::{self, BufRead, BufReader},
+        process::{Child, Command, Stdio},
+        sync::{Arc, Mutex, mpsc},
+        thread,
+        time::Duration,
+    };
+    use zbus::connection::Builder;
+
+    const DISPLAY_DEVICE_PATH: &str = "/org/freedesktop/UPower/devices/DisplayDevice";
+
+    struct PrivateBus {
+        child: Child,
+        address: String,
+    }
+
+    impl PrivateBus {
+        fn start() -> io::Result<Self> {
+            let mut child = Command::new("dbus-daemon")
+                .args(["--session", "--nofork", "--print-address=1"])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn()?;
+            let stdout = child
+                .stdout
+                .take()
+                .ok_or_else(|| io::Error::other("dbus-daemon stdout was not piped"))?;
+            let mut reader = BufReader::new(stdout);
+            let mut address = String::new();
+            match reader.read_line(&mut address) {
+                Ok(0) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    Err(io::Error::new(
+                        io::ErrorKind::UnexpectedEof,
+                        "dbus-daemon exited before publishing its address",
+                    ))
+                }
+                Ok(_) if !address.trim().is_empty() => Ok(Self {
+                    child,
+                    address: address.trim().to_owned(),
+                }),
+                Ok(_) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "dbus-daemon published an empty address",
+                    ))
+                }
+                Err(error) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    Err(error)
+                }
+            }
+        }
+    }
+
+    impl Drop for PrivateBus {
+        fn drop(&mut self) {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
+
+    #[derive(Clone)]
+    struct MockDeviceState {
+        state: u32,
+        percentage: f64,
+        energy_rate: f64,
+    }
+
+    #[derive(Clone)]
+    struct MockDevice(Arc<Mutex<MockDeviceState>>);
+
+    #[zbus::interface(name = "org.freedesktop.UPower.Device")]
+    impl MockDevice {
+        #[zbus(property, name = "Type")]
+        fn device_type(&self) -> u32 {
+            2
+        }
+
+        #[zbus(property, name = "PowerSupply")]
+        fn power_supply(&self) -> bool {
+            true
+        }
+
+        #[zbus(property, name = "State")]
+        fn state(&self) -> u32 {
+            self.0.lock().unwrap().state
+        }
+
+        #[zbus(property, name = "Percentage")]
+        fn percentage(&self) -> f64 {
+            self.0.lock().unwrap().percentage
+        }
+
+        #[zbus(property, name = "EnergyRate")]
+        fn energy_rate(&self) -> f64 {
+            self.0.lock().unwrap().energy_rate
+        }
+
+        #[zbus(property, name = "TimeToEmpty")]
+        fn time_to_empty(&self) -> i64 {
+            3_600
+        }
+
+        #[zbus(property, name = "TimeToFull")]
+        fn time_to_full(&self) -> i64 {
+            1_800
+        }
+
+        #[zbus(property, name = "EnergyFull")]
+        fn energy_full(&self) -> f64 {
+            45.0
+        }
+
+        #[zbus(property, name = "EnergyFullDesign")]
+        fn energy_full_design(&self) -> f64 {
+            50.0
+        }
+    }
+
+    struct MockManager;
+
+    #[zbus::interface(name = "org.freedesktop.UPower")]
+    impl MockManager {
+        fn get_display_device(&self) -> OwnedObjectPath {
+            OwnedObjectPath::try_from(DISPLAY_DEVICE_PATH).unwrap()
+        }
+    }
+
+    #[test]
+    fn monitor_reads_initial_snapshot_and_refreshes_changed_and_invalidated_properties() {
+        future::block_on(async {
+            let bus = PrivateBus::start().expect("private D-Bus daemon should start");
+            let device_state = Arc::new(Mutex::new(MockDeviceState {
+                state: DeviceState::Discharging as u32,
+                percentage: 72.5,
+                energy_rate: 11.25,
+            }));
+
+            let service = Builder::address(bus.address.as_str())
+                .unwrap()
+                .name(UPOWER_DESTINATION)
+                .unwrap()
+                .serve_at(UPOWER_MANAGER_PATH, MockManager)
+                .unwrap()
+                .serve_at(DISPLAY_DEVICE_PATH, MockDevice(Arc::clone(&device_state)))
+                .unwrap()
+                .build()
+                .await
+                .expect("mock UPower service should connect");
+
+            let client = Builder::address(bus.address.as_str())
+                .unwrap()
+                .build()
+                .await
+                .expect("UPower client should connect");
+            let adapter = UPowerAdapter::new(&client)
+                .await
+                .expect("adapter should resolve GetDisplayDevice");
+
+            let (updates_tx, updates_rx) = mpsc::channel();
+            let (stop_tx, stop_rx) = async_channel::bounded::<()>(1);
+            let monitor_adapter = adapter.clone();
+            let monitor = thread::spawn(move || {
+                let run =
+                    monitor_adapter.run_monitor(BatteryThresholds::default(), move |snapshot| {
+                        let _ = updates_tx.send(snapshot);
+                    });
+                let stop = async move {
+                    let _ = stop_rx.recv().await;
+                    Ok::<(), UPowerError>(())
+                };
+                future::block_on(future::or(run, stop))
+            });
+
+            let initial = updates_rx
+                .recv_timeout(Duration::from_secs(3))
+                .expect("monitor should publish its initial GetAll snapshot");
+            assert!(initial.available);
+            assert_eq!(initial.percentage, 0.725);
+            assert_eq!(initial.state, DeviceState::Discharging);
+            assert_eq!(initial.change_rate_w, -11.25);
+
+            {
+                let mut state = device_state.lock().unwrap();
+                state.state = DeviceState::Charging as u32;
+                state.percentage = 41.0;
+                state.energy_rate = -8.5;
+            }
+            let changed = HashMap::from([
+                (
+                    "State".to_owned(),
+                    OwnedValue::from(DeviceState::Charging as u32),
+                ),
+                ("Percentage".to_owned(), OwnedValue::from(41.0_f64)),
+                ("EnergyRate".to_owned(), OwnedValue::from(-8.5_f64)),
+            ]);
+            service
+                .emit_signal(
+                    None::<&str>,
+                    DISPLAY_DEVICE_PATH,
+                    DBUS_PROPERTIES_INTERFACE,
+                    "PropertiesChanged",
+                    &(UPOWER_DEVICE_INTERFACE, changed, Vec::<String>::new()),
+                )
+                .await
+                .expect("mock service should emit PropertiesChanged");
+
+            let updated = updates_rx
+                .recv_timeout(Duration::from_secs(3))
+                .expect("monitor should refresh after a changed-property signal");
+            assert_eq!(updated.percentage, 0.41);
+            assert_eq!(updated.state, DeviceState::Charging);
+            assert_eq!(updated.change_rate_w, 8.5);
+            assert_eq!(updated.time_to_full_seconds, Some(1_800));
+
+            {
+                let mut state = device_state.lock().unwrap();
+                state.percentage = 38.0;
+            }
+            let invalidated = Vec::from(["Percentage".to_owned()]);
+            service
+                .emit_signal(
+                    None::<&str>,
+                    DISPLAY_DEVICE_PATH,
+                    DBUS_PROPERTIES_INTERFACE,
+                    "PropertiesChanged",
+                    &(
+                        UPOWER_DEVICE_INTERFACE,
+                        HashMap::<String, OwnedValue>::new(),
+                        invalidated,
+                    ),
+                )
+                .await
+                .expect("mock service should emit an invalidation signal");
+
+            let refreshed = updates_rx
+                .recv_timeout(Duration::from_secs(3))
+                .expect("monitor should refresh invalidated properties with GetAll");
+            assert_eq!(refreshed.percentage, 0.38);
+            assert_eq!(refreshed.state, DeviceState::Charging);
+
+            stop_tx
+                .try_send(())
+                .expect("monitor stop signal should queue");
+            assert!(monitor.join().expect("monitor thread should join").is_ok());
+
+            drop(adapter);
+            drop(client);
+            drop(service);
+            drop(bus);
+        });
+    }
+}

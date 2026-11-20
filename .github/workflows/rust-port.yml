@@ -25,7 +25,7 @@ jobs:
       - name: Install native build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install --yes pkg-config libwayland-dev libxkbcommon-dev libfontconfig1-dev
+          sudo apt-get install --yes pkg-config libwayland-dev libxkbcommon-dev libfontconfig1-dev dbus-daemon
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable
         with:
