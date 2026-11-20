@@ -168,3 +168,15 @@ Notifications, sounds, and automatic-suspend actions remain intentionally
 unimplemented until their user-configurable behavior and safety checks are
 ported. No live UPower service, NixOS/Hyprland compositor, or memory/wakeup
 benchmark has been exercised in this hosted run.
+
+
+## UPower private-bus integration test
+
+On Linux, the UPower adapter test starts an isolated `dbus-daemon`, registers
+mock `org.freedesktop.UPower` manager and display-device objects, and connects
+the real adapter through a second D-Bus connection. It verifies the initial
+`GetDisplayDevice`/`Properties.GetAll` snapshot, a `PropertiesChanged`
+update, and a property-invalidation signal that requires a fresh full snapshot.
+The test daemon is private to the test and is terminated on teardown; it does
+not connect to or modify the developer's real system/session bus. The Rust
+port GitHub Actions job installs `dbus-daemon` explicitly for this test.
