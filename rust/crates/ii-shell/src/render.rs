@@ -494,7 +494,7 @@ mod tests {
             battery_snapshot(4.0, DeviceState::Discharging),
         );
 
-        let offset = ((18 * width + 15) * 4) as usize;
+        let offset = ((18 * width + 11) * 4) as usize;
         assert_eq!(&pixels[offset..offset + 4], &[255, 180, 171, 255]);
     }
 
@@ -563,17 +563,9 @@ mod tests {
             0,
             battery_snapshot(50.0, DeviceState::Discharging),
         );
+        let short_len = pixels.len() - 1;
         draw_battery_indicator(
-            &mut pixels,
-            width,
-            height,
-            10,
-            7,
-            1,
-            battery_snapshot(50.0, DeviceState::Discharging),
-        );
-        draw_battery_indicator(
-            &mut pixels[..pixels.len() - 1],
+            &mut pixels[..short_len],
             width,
             height,
             10,
