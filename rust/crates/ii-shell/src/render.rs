@@ -1,10 +1,6 @@
 use tiny_skia::{Color, Paint, Pixmap, PixmapMut, Rect, Transform};
 
-use crate::{
-    battery::BatterySnapshot,
-    icon_lookup::IconResolver,
-    workspace_model::WorkspaceModel,
-};
+use crate::{battery::BatterySnapshot, icon_lookup::IconResolver, workspace_model::WorkspaceModel};
 
 /// Draws the idle panel background and a restrained accent marker into a
 /// caller-owned Wayland SHM buffer. No intermediate full-frame allocation.
@@ -22,7 +18,6 @@ pub fn draw_panel(pixels: &mut [u8], width: u32, height: u32) {
     paint.set_color(Color::from_rgba8(178, 83, 93, 255));
     pixmap.fill_rect(rect, &paint, Transform::identity(), None);
 }
-
 
 /// Logical size of the compact upstream-style clipped battery progress bar.
 pub const BATTERY_INDICATOR_WIDTH: u32 = 56;
@@ -433,7 +428,6 @@ fn fill_rect(pixmap: &mut PixmapMut<'_>, x: f32, y: f32, width: f32, height: f32
 mod tests {
     use super::*;
     use crate::workspace_model::WorkspaceSlot;
-
 
     fn battery_snapshot(percent: f64, state: DeviceState) -> BatterySnapshot {
         BatterySnapshot::from_upower(
