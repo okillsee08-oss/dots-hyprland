@@ -926,17 +926,20 @@ impl RustShell {
                 );
 
                 let indicator_width = render::BATTERY_INDICATOR_WIDTH as i32 * scale;
-                let label_width = label.chars().count() as i32 * 7 * scale;
+                let label_width = label.chars().count() as i32 * 6 * scale;
                 let charging_bolt_visible = snapshot.is_charging && snapshot.percentage < 1.0;
-                let bolt_offset = if charging_bolt_visible { 4 * scale } else { 0 };
-                let label_x = battery_x + (indicator_width - label_width).max(0) / 2 + bolt_offset;
+                let label_x = if charging_bolt_visible {
+                    battery_x + 11 * scale
+                } else {
+                    battery_x + (indicator_width - label_width).max(0) / 2
+                };
                 text.draw_text_styled(
                     pixels,
                     geometry.buffer_width,
                     geometry.buffer_height,
                     label,
                     text::TextStyle {
-                        origin: (label_x, 8 * scale),
+                        origin: (label_x, 9 * scale),
                         font_size: 10.0 * scale as f32,
                         color: (49, 48, 48, 255),
                     },
