@@ -268,7 +268,7 @@ Hard constraints:
   modules/common/widgets/ClippedProgressBar.qml,
   modules/common/widgets/MaterialSymbol.qml, modules/common/Icons.qml,
   modules/common/Appearance.qml, and modules/common/Config.qml.
-  The upstream indicator uses a 56-by-22 logical clipped progress area,
+  The upstream indicator uses a 30-by-18 logical clipped progress area,
   error-colored fill when low and not charging, and a charging bolt below
   100%; its text is clipped out of the fill. The native implementation uses
   the same logical dimensions and state conditions, a dark contrasting text
@@ -332,4 +332,18 @@ Hard constraints:
   detailed battery popup, notifications, sounds, guarded suspend, real
   system UPower validation, NixOS/Hyprland runtime testing, and measured
   RSS/PSS/wakeup/frame-time comparisons remain outstanding.
+
+
+## Battery indicator upstream-size correction (2026-11-21)
+
+- A closer check of the inspected upstream ClippedProgressBar.qml showed that
+  its default valueBarWidth/valueBarHeight are 30 × 18 logical pixels; the
+  earlier 56 × 22 estimate was incorrect. Corrected the native constants to
+  those upstream defaults and kept the indicator vertically centered in the
+  36-pixel panel.
+- Repositioned the charging bolt and percentage overlay to fit the smaller
+  track. Added an outside-track pixel assertion so the fixed width is tested.
+- Updated rust/README.md and this status record. The original upstream QML
+  remains unchanged. The correction is on rust-port/phase-0 and awaits CI;
+  it will not be merged to main unless all four required checks pass.
 
