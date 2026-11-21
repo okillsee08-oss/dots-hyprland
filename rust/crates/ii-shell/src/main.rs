@@ -867,10 +867,8 @@ impl RustShell {
             let battery_label = battery_snapshot
                 .filter(|snapshot| snapshot.available)
                 .map(|snapshot| format!("{:.0}%", snapshot.percentage * 100.0));
-            let battery_width = battery_label.as_ref().map_or(0, |label| {
-                (label.chars().count() as u32)
-                    .saturating_mul(7)
-                    .saturating_mul(scale as u32)
+            let battery_width = battery_label.as_ref().map_or(0, |_| {
+                render::BATTERY_INDICATOR_WIDTH.saturating_mul(scale as u32)
             });
             let battery_x = battery_label.as_ref().and(clock_x).and_then(|x| {
                 let reserved = i32::try_from(battery_width.saturating_add(clock_padding)).ok()?;
@@ -910,14 +908,38 @@ impl RustShell {
                     12.0 * scale as f32,
                 );
             }
-            if let (Some(label), Some(battery_x)) = (battery_label.as_deref(), battery_x) {
-                text.draw_text(
+            if let (Some(label), Some(battery_x), Some(snapshot)) = (
+                battery_label.as_deref(),
+                battery_x,
+                battery_snapshot.filter(|snapshot| snapshot.available),
+            ) {
+                let battery_y =
+                    ((PANEL_HEIGHT - render::BATTERY_INDICATOR_HEIGHT) / 2) as i32 * scale;
+                render::draw_battery_indicator(
+                    pixels,
+                    geometry.buffer_width,
+                    geometry.buffer_height,
+                    battery_x,
+                    battery_y,
+                    scale as u32,
+                    snapshot,
+                );
+
+                let indicator_width = render::BATTERY_INDICATOR_WIDTH as i32 * scale;
+                let label_width = label.chars().count() as i32 * 7 * scale;
+                let charging_bolt_visible = snapshot.is_charging && snapshot.percentage < 1.0;
+                let bolt_offset = if charging_bolt_visible { 4 * scale } else { 0 };
+                let label_x = battery_x + (indicator_width - label_width).max(0) / 2 + bolt_offset;
+                text.draw_text_styled(
                     pixels,
                     geometry.buffer_width,
                     geometry.buffer_height,
                     label,
-                    (battery_x, 5 * scale),
-                    11.0 * scale as f32,
+                    text::TextStyle {
+                        origin: (label_x, 8 * scale),
+                        font_size: 10.0 * scale as f32,
+                        color: (49, 48, 48, 255),
+                    },
                 );
             }
             if let Some(clock_x) = clock_x {

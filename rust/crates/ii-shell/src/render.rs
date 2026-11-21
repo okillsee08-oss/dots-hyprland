@@ -1,6 +1,6 @@
 use tiny_skia::{Color, Paint, Pixmap, PixmapMut, Rect, Transform};
 
-use crate::{icon_lookup::IconResolver, workspace_model::WorkspaceModel};
+use crate::{battery::BatterySnapshot, icon_lookup::IconResolver, workspace_model::WorkspaceModel};
 
 /// Draws the idle panel background and a restrained accent marker into a
 /// caller-owned Wayland SHM buffer. No intermediate full-frame allocation.
@@ -17,6 +17,226 @@ pub fn draw_panel(pixels: &mut [u8], width: u32, height: u32) {
     let mut paint = Paint::default();
     paint.set_color(Color::from_rgba8(178, 83, 93, 255));
     pixmap.fill_rect(rect, &paint, Transform::identity(), None);
+}
+
+/// Logical size of the compact upstream-style clipped battery progress bar.
+pub const BATTERY_INDICATOR_WIDTH: u32 = 56;
+pub const BATTERY_INDICATOR_HEIGHT: u32 = 22;
+
+/// Draw the upstream battery indicator into the existing panel SHM buffer.
+///
+/// The track and fill are rasterized directly into the caller-owned buffer.
+/// No temporary pixmap, path allocation, image resource, or timer is created.
+/// The caller overlays the percentage text using the shared TextEngine.
+pub fn draw_battery_indicator(
+    pixels: &mut [u8],
+    buffer_width: u32,
+    buffer_height: u32,
+    x: i32,
+    y: i32,
+    scale: u32,
+    snapshot: BatterySnapshot,
+) {
+    if scale == 0 || !snapshot.available || buffer_width == 0 || buffer_height == 0 {
+        return;
+    }
+
+    let Some(required_len) = (buffer_width as usize)
+        .checked_mul(buffer_height as usize)
+        .and_then(|size| size.checked_mul(4))
+    else {
+        return;
+    };
+    if pixels.len() < required_len {
+        return;
+    }
+
+    let Ok(scale) = i32::try_from(scale) else {
+        return;
+    };
+    let width = (BATTERY_INDICATOR_WIDTH as i32).saturating_mul(scale);
+    let height = (BATTERY_INDICATOR_HEIGHT as i32).saturating_mul(scale);
+    if width <= 0 || height <= 0 {
+        return;
+    }
+
+    fill_rounded_rect_pixels(
+        pixels,
+        buffer_width,
+        buffer_height,
+        RoundedRectPixels {
+            x,
+            y,
+            width,
+            height,
+            radius: 11 * scale,
+            color: [73, 70, 74, 255],
+        },
+    );
+
+    let percentage = if snapshot.percentage.is_finite() {
+        snapshot.percentage.clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let fill_width = (f64::from(width) * percentage).round() as i32;
+    if fill_width > 0 {
+        let fill_color = if snapshot.is_low && !snapshot.is_charging {
+            [255, 180, 171, 255]
+        } else {
+            [236, 230, 233, 255]
+        };
+        fill_rounded_rect_pixels(
+            pixels,
+            buffer_width,
+            buffer_height,
+            RoundedRectPixels {
+                x,
+                y,
+                width: fill_width,
+                height,
+                radius: 2 * scale,
+                color: fill_color,
+            },
+        );
+    }
+
+    // Material-style bolt glyph, drawn only while charging and below 100%.
+    // A small fixed polygon avoids requiring an icon font or another cache.
+    if snapshot.is_charging && percentage < 1.0 {
+        let points = [
+            (x + 11 * scale, y + 4 * scale),
+            (x + 7 * scale, y + 12 * scale),
+            (x + 11 * scale, y + 12 * scale),
+            (x + 9 * scale, y + 18 * scale),
+            (x + 16 * scale, y + 9 * scale),
+            (x + 12 * scale, y + 9 * scale),
+            (x + 14 * scale, y + 4 * scale),
+        ];
+        fill_polygon_pixels(
+            pixels,
+            buffer_width,
+            buffer_height,
+            &points,
+            [49, 48, 48, 255],
+        );
+    }
+}
+
+#[derive(Clone, Copy)]
+struct RoundedRectPixels {
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    radius: i32,
+    color: [u8; 4],
+}
+
+fn fill_rounded_rect_pixels(
+    pixels: &mut [u8],
+    buffer_width: u32,
+    buffer_height: u32,
+    rect: RoundedRectPixels,
+) {
+    if rect.width <= 0 || rect.height <= 0 {
+        return;
+    }
+
+    let right = rect.x.saturating_add(rect.width).min(buffer_width as i32);
+    let bottom = rect.y.saturating_add(rect.height).min(buffer_height as i32);
+    let left = rect.x.max(0);
+    let top = rect.y.max(0);
+    if left >= right || top >= bottom {
+        return;
+    }
+
+    let radius = rect.radius.max(0).min(rect.width / 2).min(rect.height / 2);
+    let radius_squared = i64::from(radius) * i64::from(radius);
+    for py in top..bottom {
+        let nearest_y = if py < rect.y + radius {
+            rect.y + radius
+        } else if py >= rect.y + rect.height - radius {
+            rect.y + rect.height - radius - 1
+        } else {
+            py
+        };
+        for px in left..right {
+            let nearest_x = if px < rect.x + radius {
+                rect.x + radius
+            } else if px >= rect.x + rect.width - radius {
+                rect.x + rect.width - radius - 1
+            } else {
+                px
+            };
+            let dx = i64::from(px - nearest_x);
+            let dy = i64::from(py - nearest_y);
+            if radius == 0 || dx * dx + dy * dy <= radius_squared {
+                let offset = ((py as usize * buffer_width as usize) + px as usize) * 4;
+                pixels[offset..offset + 4].copy_from_slice(&rect.color);
+            }
+        }
+    }
+}
+
+fn fill_polygon_pixels(
+    pixels: &mut [u8],
+    buffer_width: u32,
+    buffer_height: u32,
+    points: &[(i32, i32)],
+    color: [u8; 4],
+) {
+    if points.len() < 3 {
+        return;
+    }
+
+    let min_x = points.iter().map(|point| point.0).min().unwrap_or(0).max(0);
+    let max_x = points
+        .iter()
+        .map(|point| point.0)
+        .max()
+        .unwrap_or(0)
+        .min(buffer_width as i32);
+    let min_y = points.iter().map(|point| point.1).min().unwrap_or(0).max(0);
+    let max_y = points
+        .iter()
+        .map(|point| point.1)
+        .max()
+        .unwrap_or(0)
+        .min(buffer_height as i32);
+    if min_x >= max_x || min_y >= max_y {
+        return;
+    }
+
+    for py in min_y..max_y {
+        for px in min_x..max_x {
+            if point_in_polygon(px as f32 + 0.5, py as f32 + 0.5, points) {
+                let offset = ((py as usize * buffer_width as usize) + px as usize) * 4;
+                pixels[offset..offset + 4].copy_from_slice(&color);
+            }
+        }
+    }
+}
+
+fn point_in_polygon(x: f32, y: f32, points: &[(i32, i32)]) -> bool {
+    let mut inside = false;
+    let mut previous = points.len() - 1;
+    for current in 0..points.len() {
+        let (current_x, current_y) = points[current];
+        let (previous_x, previous_y) = points[previous];
+        let current_y = current_y as f32;
+        let previous_y = previous_y as f32;
+        if (current_y > y) != (previous_y > y) {
+            let intersection_x = (previous_x - current_x) as f32 * (y - current_y)
+                / (previous_y - current_y)
+                + current_x as f32;
+            if x < intersection_x {
+                inside = !inside;
+            }
+        }
+        previous = current;
+    }
+    inside
 }
 
 /// Draws the native workspace strip without an icon resolver. This wrapper
@@ -216,7 +436,155 @@ fn fill_rect(pixmap: &mut PixmapMut<'_>, x: f32, y: f32, width: f32, height: f32
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workspace_model::WorkspaceSlot;
+    use crate::{
+        battery::{BatteryThresholds, DeviceState, UPowerBatteryProperties},
+        workspace_model::WorkspaceSlot,
+    };
+
+    fn battery_snapshot(percent: f64, state: DeviceState) -> BatterySnapshot {
+        BatterySnapshot::from_upower(
+            UPowerBatteryProperties {
+                device_type: 2,
+                power_supply: true,
+                state: state as u32,
+                percentage_percent: percent,
+                energy_rate_w: 12.0,
+                time_to_empty_seconds: 3_600,
+                time_to_full_seconds: 1_800,
+                energy_full: Some(45.0),
+                energy_full_design: Some(50.0),
+            },
+            BatteryThresholds::default(),
+        )
+    }
+
+    #[test]
+    fn battery_indicator_draws_proportional_fill_and_track() {
+        let width = 100u32;
+        let height = 36u32;
+        let mut pixels = vec![0; (width * height * 4) as usize];
+        draw_panel(&mut pixels, width, height);
+
+        draw_battery_indicator(
+            &mut pixels,
+            width,
+            height,
+            10,
+            7,
+            1,
+            battery_snapshot(50.0, DeviceState::Discharging),
+        );
+
+        let pixel = |x: u32, y: u32| -> [u8; 4] {
+            let offset = ((y * width + x) * 4) as usize;
+            pixels[offset..offset + 4].try_into().unwrap()
+        };
+        assert_eq!(pixel(15, 18), [236, 230, 233, 255]);
+        assert_eq!(pixel(55, 18), [73, 70, 74, 255]);
+    }
+
+    #[test]
+    fn low_battery_uses_error_fill_color() {
+        let width = 100u32;
+        let height = 36u32;
+        let mut pixels = vec![0; (width * height * 4) as usize];
+        draw_panel(&mut pixels, width, height);
+
+        draw_battery_indicator(
+            &mut pixels,
+            width,
+            height,
+            10,
+            7,
+            1,
+            battery_snapshot(4.0, DeviceState::Discharging),
+        );
+
+        let offset = ((18 * width + 11) * 4) as usize;
+        assert_eq!(&pixels[offset..offset + 4], &[255, 180, 171, 255]);
+    }
+
+    #[test]
+    fn charging_bolt_is_drawn_only_while_charging_below_full() {
+        let width = 100u32;
+        let height = 36u32;
+        let mut charging_pixels = vec![0; (width * height * 4) as usize];
+        draw_panel(&mut charging_pixels, width, height);
+        draw_battery_indicator(
+            &mut charging_pixels,
+            width,
+            height,
+            10,
+            7,
+            1,
+            battery_snapshot(50.0, DeviceState::Charging),
+        );
+        let offset = ((12 * width + 22) * 4) as usize;
+        assert_eq!(&charging_pixels[offset..offset + 4], &[49, 48, 48, 255]);
+
+        let mut discharging_pixels = vec![0; (width * height * 4) as usize];
+        draw_panel(&mut discharging_pixels, width, height);
+        draw_battery_indicator(
+            &mut discharging_pixels,
+            width,
+            height,
+            10,
+            7,
+            1,
+            battery_snapshot(50.0, DeviceState::Discharging),
+        );
+        assert_eq!(
+            &discharging_pixels[offset..offset + 4],
+            &[236, 230, 233, 255]
+        );
+
+        let mut full_pixels = vec![0; (width * height * 4) as usize];
+        draw_panel(&mut full_pixels, width, height);
+        draw_battery_indicator(
+            &mut full_pixels,
+            width,
+            height,
+            10,
+            7,
+            1,
+            battery_snapshot(100.0, DeviceState::Charging),
+        );
+        assert_eq!(&full_pixels[offset..offset + 4], &[236, 230, 233, 255]);
+    }
+
+    #[test]
+    fn battery_indicator_handles_zero_scale_invalid_buffers_and_missing_devices() {
+        let width = 100u32;
+        let height = 36u32;
+        let mut pixels = vec![0; (width * height * 4) as usize];
+        draw_panel(&mut pixels, width, height);
+        let original = pixels.clone();
+
+        draw_battery_indicator(
+            &mut pixels,
+            width,
+            height,
+            10,
+            7,
+            0,
+            battery_snapshot(50.0, DeviceState::Discharging),
+        );
+        let short_len = pixels.len() - 1;
+        draw_battery_indicator(
+            &mut pixels[..short_len],
+            width,
+            height,
+            10,
+            7,
+            1,
+            battery_snapshot(50.0, DeviceState::Discharging),
+        );
+        let mut unavailable = battery_snapshot(50.0, DeviceState::Discharging);
+        unavailable.available = false;
+        draw_battery_indicator(&mut pixels, width, height, 10, 7, 1, unavailable);
+
+        assert_eq!(pixels, original);
+    }
 
     #[test]
     fn fills_the_supplied_buffer_without_changing_its_size() {

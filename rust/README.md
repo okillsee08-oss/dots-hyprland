@@ -155,15 +155,18 @@ backoff (250 ms to 30 s), and publishes snapshots into a single
 existing Wayland/Hyprland `poll(2)` loop; multiple property changes coalesce
 to the newest snapshot rather than building a queue. The UI thread only drains
 the eventfd and copies the latest immutable snapshot, then redraws panels when
-the value actually changes. The current panel displays the available battery
-percentage beside the clock and reserves title space to avoid overlap.
+the value actually changes. The panel now draws an upstream-inspired rounded
+clipped progress bar beside the clock, with a red fill below the low threshold
+and a small charging bolt while charging below 100%. Percentage text is
+overlaid through the shared cosmic-text font system with a contrasting
+foreground. The indicator reserves a fixed logical width so title-space
+reservation remains bounded across percentage changes.
 
 This bridge uses one additional process-wide D-Bus worker thread, not one
 thread per widget. The worker can be stopped and joined during shell shutdown.
 The zbus async-io backend's internal executor overhead has not been measured
-or removed. The indicator is currently a percentage label rather than the
-upstream clipped progress bar/bolt treatment; battery thresholds still use
-upstream defaults rather than the full user configuration parser.
+or removed. Battery thresholds still use upstream defaults rather than the
+full user configuration parser.
 Notifications, sounds, and automatic-suspend actions remain intentionally
 unimplemented until their user-configurable behavior and safety checks are
 ported. No live UPower service, NixOS/Hyprland compositor, or memory/wakeup
@@ -180,3 +183,18 @@ update, and a property-invalidation signal that requires a fresh full snapshot.
 The test daemon is private to the test and is terminated on teardown; it does
 not connect to or modify the developer's real system/session bus. The Rust
 port GitHub Actions job installs `dbus-daemon` explicitly for this test.
+
+
+## Native battery indicator rendering
+
+The renderer draws the track and proportional fill directly into the existing
+Wayland SHM buffer. Low, non-charging states use the upstream error color, and
+a small fixed-vector bolt is drawn only while charging below 100%. The
+percentage label uses the shared cosmic-text font system with a dark
+foreground for contrast. No per-frame pixmap, icon resource, or additional
+worker is created; updates remain driven by battery snapshot changes.
+
+Pixel-level tests cover proportional fill, track color, low-battery color,
+charging-bolt visibility, zero scale, unavailable devices, and short buffers.
+Configurable battery thresholds, the popup, notifications, sounds, and guarded
+suspend behavior remain separate parity work.
