@@ -344,8 +344,9 @@ Hard constraints:
 - Repositioned the charging bolt and percentage overlay to fit the smaller
   track. Added an outside-track pixel assertion so the fixed width is tested.
 - Updated rust/README.md and this status record. The original upstream QML
-  remains unchanged. The correction is on rust-port/phase-0 and awaits CI;
-  it will not be merged to main unless all four required checks pass.
+  remains unchanged. PR #6 was merged after GitHub Actions run #133 passed
+  Format, Check, Test and Clippy. GitHub confirmed merge commit
+  [5c06faa](https://github.com/okillsee08-oss/dots-hyprland/commit/5c06faac36a995818b4573f6de77ccf0c8499e73).
 
 
 
