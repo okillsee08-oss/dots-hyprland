@@ -1,6 +1,8 @@
-use std::{env, fs, path::PathBuf};
+use std::{env, fs, path::{Path, PathBuf}};
 
 use serde::{Deserialize, Serialize};
+
+use crate::battery::BatteryThresholds;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -86,14 +88,10 @@ impl WorkspaceBarConfig {
     /// Missing, unreadable or malformed files fall back to the upstream
     /// default of ten workspaces; this function never writes a file.
     pub fn load() -> Self {
-        let config_home = env::var_os("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
-            .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")));
-        let Some(config_home) = config_home else {
+        let Some(path) = upstream_config_path() else {
             return Self::default();
         };
-
-        Self::load_from_path(&config_home.join("illogical-impulse/config.json"))
+        Self::load_from_path(&path)
     }
 
     pub fn load_from_path(path: &std::path::Path) -> Self {
@@ -101,6 +99,73 @@ impl WorkspaceBarConfig {
             .map(|contents| Self::from_upstream_json(&contents))
             .unwrap_or_default()
     }
+}
+
+/// Battery options read from the existing upstream Illogical Impulse JSON.
+/// Invalid or out-of-range values fall back independently to upstream defaults.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BatteryConfig {
+    pub thresholds: BatteryThresholds,
+}
+
+impl Default for BatteryConfig {
+    fn default() -> Self {
+        Self {
+            thresholds: BatteryThresholds::default(),
+        }
+    }
+}
+
+impl BatteryConfig {
+    /// Parse the root-level battery object used by upstream Config.qml.
+    pub fn from_upstream_json(input: &str) -> Self {
+        let Ok(root) = serde_json::from_str::<serde_json::Value>(input) else {
+            return Self::default();
+        };
+        let defaults = BatteryThresholds::default();
+        Self {
+            thresholds: BatteryThresholds {
+                low_percent: battery_percent(&root, "/battery/low", defaults.low_percent, 100),
+                critical_percent: battery_percent(&root, "/battery/critical", defaults.critical_percent, 100),
+                suspend_percent: battery_percent(&root, "/battery/suspend", defaults.suspend_percent, 100),
+                full_percent: battery_percent(&root, "/battery/full", defaults.full_percent, 101),
+                automatic_suspend: root
+                    .pointer("/battery/automaticSuspend")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(defaults.automatic_suspend),
+            },
+        }
+    }
+
+    /// Load battery options from the existing upstream config path.
+    /// This function never creates or modifies user-owned configuration.
+    pub fn load() -> Self {
+        let Some(path) = upstream_config_path() else {
+            return Self::default();
+        };
+        Self::load_from_path(&path)
+    }
+
+    pub fn load_from_path(path: &Path) -> Self {
+        fs::read_to_string(path)
+            .map(|contents| Self::from_upstream_json(&contents))
+            .unwrap_or_default()
+    }
+}
+
+fn battery_percent(root: &serde_json::Value, pointer: &str, fallback: u8, maximum: u8) -> u8 {
+    root.pointer(pointer)
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|value| u8::try_from(value).ok())
+        .filter(|value| *value <= maximum)
+        .unwrap_or(fallback)
+}
+
+fn upstream_config_path() -> Option<PathBuf> {
+    let config_home = env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))?;
+    Some(config_home.join("illogical-impulse/config.json"))
 }
 
 #[cfg(test)]
@@ -148,6 +213,55 @@ mod tests {
         ] {
             assert_eq!(WorkspaceBarConfig::from_upstream_json(input).shown, 10);
         }
+    }
+
+    #[test]
+    fn reads_all_upstream_battery_thresholds_and_suspend_toggle() {
+        let config = BatteryConfig::from_upstream_json(
+            r#"{"battery":{"low":25,"critical":10,"suspend":7,"full":95,"automaticSuspend":false}}"#,
+        );
+
+        assert_eq!(
+            config.thresholds,
+            BatteryThresholds {
+                low_percent: 25,
+                critical_percent: 10,
+                suspend_percent: 7,
+                full_percent: 95,
+                automatic_suspend: false,
+            }
+        );
+    }
+
+    #[test]
+    fn accepts_upstream_battery_boundary_values() {
+        let config = BatteryConfig::from_upstream_json(
+            r#"{"battery":{"low":0,"critical":100,"suspend":0,"full":101,"automaticSuspend":false}}"#,
+        );
+        assert_eq!(config.thresholds.low_percent, 0);
+        assert_eq!(config.thresholds.critical_percent, 100);
+        assert_eq!(config.thresholds.suspend_percent, 0);
+        assert_eq!(config.thresholds.full_percent, 101);
+        assert!(!config.thresholds.automatic_suspend);
+    }
+
+    #[test]
+    fn invalid_battery_fields_fall_back_to_upstream_defaults() {
+        let config = BatteryConfig::from_upstream_json(
+            r#"{"battery":{"low":101,"critical":-1,"suspend":"3","full":102,"automaticSuspend":"false"}}"#,
+        );
+        assert_eq!(config, BatteryConfig::default());
+    }
+
+    #[test]
+    fn partial_or_malformed_battery_config_uses_safe_defaults() {
+        let partial = BatteryConfig::from_upstream_json(r#"{"battery":{"low":15}}"#);
+        assert_eq!(partial.thresholds.low_percent, 15);
+        assert_eq!(partial.thresholds.critical_percent, 5);
+        assert_eq!(partial.thresholds.suspend_percent, 3);
+        assert_eq!(partial.thresholds.full_percent, 101);
+        assert!(partial.thresholds.automatic_suspend);
+        assert_eq!(BatteryConfig::from_upstream_json("not-json"), BatteryConfig::default());
     }
 
     #[test]
