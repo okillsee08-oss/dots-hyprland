@@ -278,7 +278,7 @@ Hard constraints:
   buffer; it allocates no intermediate pixmap, icon or path and creates no
   worker/timer. The bar is reserved at a fixed width before the clock so the
   active-window title cannot overlap it.
-- Added TextEngine::draw_text_color so the percentage can use a contrasting
+- Added TextStyle and TextEngine::draw_text_styled so the percentage can use a contrasting
   foreground while reusing the process-wide cosmic-text font system and glyph
   cache. Existing text rendering behavior remains unchanged.
 - Added pixel-level tests for proportional fill/track colors, low-battery
@@ -288,12 +288,25 @@ Hard constraints:
   configuration, scripts, assets or license files were changed.
 - Source commits: 4bafe5460687369ce0f2a27522f99afb4bcf558f (colored text),
   e88175683b785ebfc1f1cb9147297d863133b490 (indicator renderer),
-  b29895308477320fa56b0cffcdff036bdbaf2819 (panel integration), and
-  706fda1224dc088ed58de0ff9d07e84e671bdba7 (edge-case test corrections).
-  README commit: 6e057ac88f512c70ef9a9db89baeb7b0d236c40c.
-- This hosted environment has no cargo or rustc; local formatting,
-  compilation, tests and Clippy cannot be run here. GitHub Actions verification
-  is pending. No component has been merged to main in this update.
+  b29895308477320fa56b0cffcdff036bdbaf2819 (panel integration),
+  706fda1224dc088ed58de0ff9d07e84e671bdba7 (edge-case assertions),
+  82c52b0cdbe38b5d27a3c2183cefe047d4753567 (TextStyle refactor),
+  5a4ad6116ad49d44491a9710d11c298929ffd4f1 (panel TextStyle use),
+  d97ee7f10964639802ecc56a7df99e48c210d32c (rounded-rectangle parameter
+  struct), and 9af2b4d8c539982f996d8b1a343cfd23026d0211 (final test import
+  formatting). README commit: 6e057ac88f512c70ef9a9db89baeb7b0d236c40c.
+- GitHub Actions run #112 initially stopped at Format; run #116 passed Format
+  and Check but exposed missing battery test imports; run #118 stopped at
+  Format; run #120 passed Format, Check and Test (113 workspace tests plus
+  3 config-watcher tests) but Clippy identified two too-many-arguments
+  functions. Those issues were corrected by the TextStyle and
+  RoundedRectPixels value types. Final PR verification, Actions run #126,
+  passed Format, Check, Test and Clippy with -D warnings. Its Test step passed
+  113 Rust workspace tests and 3 config-watcher tests (116 total).
+- This hosted environment has no cargo or rustc, so local Rust commands could
+  not run; the successful checks were executed by GitHub Actions. No actual
+  NixOS/Hyprland runtime or RSS/PSS benchmark is claimed. PR #5 is open and
+  eligible for merge after confirming the final PR head and required checks.
 - Remaining battery parity includes parsing the user-configured thresholds,
   the detailed popup, low/critical/full notifications and sounds, and guarded
   automatic suspend. A real system UPower service, NixOS/Hyprland compositor,
