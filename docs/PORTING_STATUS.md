@@ -305,10 +305,31 @@ Hard constraints:
   113 Rust workspace tests and 3 config-watcher tests (116 total).
 - This hosted environment has no cargo or rustc, so local Rust commands could
   not run; the successful checks were executed by GitHub Actions. No actual
-  NixOS/Hyprland runtime or RSS/PSS benchmark is claimed. PR #5 is open and
-  eligible for merge after confirming the final PR head and required checks.
+  NixOS/Hyprland runtime or RSS/PSS benchmark is claimed. PR #5 was merged after confirming the final PR head was mergeable and the
+  required GitHub Actions checks passed.
 - Remaining battery parity includes parsing the user-configured thresholds,
   the detailed popup, low/critical/full notifications and sounds, and guarded
   automatic suspend. A real system UPower service, NixOS/Hyprland compositor,
   and RSS/PSS/wakeup/frame-time benchmarks remain untested.
+
+
+## Native clipped battery indicator merged to main (2026-11-21)
+
+- [PR #5](https://github.com/okillsee08-oss/dots-hyprland/pull/5),
+  "Add native clipped battery indicator", was merged after GitHub Actions
+  [run #126](https://github.com/okillsee08-oss/dots-hyprland/actions/runs/44929534845)
+  passed Format, Check, Test and Clippy with warnings denied. The Test step
+  passed 113 Rust workspace tests plus 3 config-watcher tests (116 total).
+- GitHub confirmed merge commit
+  [fd5caff](https://github.com/okillsee08-oss/dots-hyprland/commit/fd5caffd0249bd12136e50ff2cbe3ba6afd41c39).
+  The development branch was advanced to that merge commit using a normal
+  fast-forward ref update with an expected-head check; no force-push or
+  history rewrite was used.
+- The native panel now paints the clipped battery track/fill and charging
+  bolt directly into the existing SHM buffer and overlays percentage text
+  through the shared font engine. The existing upstream QML remains intact.
+- This is a visual parity milestone only. Configurable thresholds, the
+  detailed battery popup, notifications, sounds, guarded suspend, real
+  system UPower validation, NixOS/Hyprland runtime testing, and measured
+  RSS/PSS/wakeup/frame-time comparisons remain outstanding.
 
