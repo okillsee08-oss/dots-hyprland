@@ -187,7 +187,8 @@ port GitHub Actions job installs `dbus-daemon` explicitly for this test.
 
 ## Native battery indicator rendering
 
-The renderer draws the track and proportional fill directly into the existing
+The renderer uses the upstream ClippedProgressBar defaults (30 × 18 logical
+pixels) and draws the track and proportional fill directly into the existing
 Wayland SHM buffer. Low, non-charging states use the upstream error color, and
 a small fixed-vector bolt is drawn only while charging below 100%. The
 percentage label uses the shared cosmic-text font system with a dark
