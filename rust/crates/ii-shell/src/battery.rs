@@ -280,9 +280,12 @@ mod tests {
         assert!(custom.is_suspending);
         assert!(custom.should_automatic_suspend);
 
-        let disabled = custom.with_thresholds(BatteryThresholds {
+        let disabled = original.with_thresholds(BatteryThresholds {
+            low_percent: 10,
+            critical_percent: 5,
+            suspend_percent: 5,
+            full_percent: 101,
             automatic_suspend: false,
-            ..BatteryThresholds::default()
         });
         assert!(disabled.is_suspending);
         assert!(!disabled.should_automatic_suspend);
