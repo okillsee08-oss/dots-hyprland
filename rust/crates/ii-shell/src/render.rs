@@ -427,7 +427,10 @@ fn fill_rect(pixmap: &mut PixmapMut<'_>, x: f32, y: f32, width: f32, height: f32
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{battery::{BatteryThresholds, DeviceState, UPowerBatteryProperties}, workspace_model::WorkspaceSlot};
+    use crate::{
+        battery::{BatteryThresholds, DeviceState, UPowerBatteryProperties},
+        workspace_model::WorkspaceSlot,
+    };
 
     fn battery_snapshot(percent: f64, state: DeviceState) -> BatterySnapshot {
         BatterySnapshot::from_upower(
