@@ -378,3 +378,14 @@ Hard constraints:
 - No upstream QML, configuration, scripts, assets or license files were
   modified. Real UPower, NixOS/Hyprland and memory/performance validation remain
   outstanding.
+- [PR #7](https://github.com/okillsee08-oss/dots-hyprland/pull/7) was merged
+  after GitHub Actions [run #141](https://github.com/okillsee08-oss/dots-hyprland/actions/runs/44931226139)
+  passed Format, Check, Test and Clippy with warnings denied. The Test step
+  passed 118 Rust workspace tests and 3 config-watcher tests (121 total).
+- GitHub confirmed merge commit
+  [2e31957](https://github.com/okillsee08-oss/dots-hyprland/commit/2e31957d3174bb20a0eeef2d50c50b0946f033e7).
+  The development branch was advanced to the merge commit with a normal
+  expected-head fast-forward update; no force-push or history rewrite was used.
+- Initial formatting-only failures on the earlier attempts were corrected
+  before the final successful PR run. The hosted environment has no local
+  cargo/rustc, so all Rust checks ran in GitHub Actions.
