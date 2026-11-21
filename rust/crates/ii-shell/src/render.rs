@@ -20,8 +20,8 @@ pub fn draw_panel(pixels: &mut [u8], width: u32, height: u32) {
 }
 
 /// Logical size of the compact upstream-style clipped battery progress bar.
-pub const BATTERY_INDICATOR_WIDTH: u32 = 56;
-pub const BATTERY_INDICATOR_HEIGHT: u32 = 22;
+pub const BATTERY_INDICATOR_WIDTH: u32 = 30;
+pub const BATTERY_INDICATOR_HEIGHT: u32 = 18;
 
 /// Draw the upstream battery indicator into the existing panel SHM buffer.
 ///
@@ -69,7 +69,7 @@ pub fn draw_battery_indicator(
             y,
             width,
             height,
-            radius: 11 * scale,
+            radius: 9 * scale,
             color: [73, 70, 74, 255],
         },
     );
@@ -105,13 +105,13 @@ pub fn draw_battery_indicator(
     // A small fixed polygon avoids requiring an icon font or another cache.
     if snapshot.is_charging && percentage < 1.0 {
         let points = [
-            (x + 11 * scale, y + 4 * scale),
-            (x + 7 * scale, y + 12 * scale),
-            (x + 11 * scale, y + 12 * scale),
-            (x + 9 * scale, y + 18 * scale),
-            (x + 16 * scale, y + 9 * scale),
-            (x + 12 * scale, y + 9 * scale),
-            (x + 14 * scale, y + 4 * scale),
+            (x + 10 * scale, y + 2 * scale),
+            (x + 6 * scale, y + 9 * scale),
+            (x + 10 * scale, y + 9 * scale),
+            (x + 8 * scale, y + 16 * scale),
+            (x + 16 * scale, y + 7 * scale),
+            (x + 12 * scale, y + 7 * scale),
+            (x + 14 * scale, y + 2 * scale),
         ];
         fill_polygon_pixels(
             pixels,
@@ -480,7 +480,8 @@ mod tests {
             pixels[offset..offset + 4].try_into().unwrap()
         };
         assert_eq!(pixel(15, 18), [236, 230, 233, 255]);
-        assert_eq!(pixel(55, 18), [73, 70, 74, 255]);
+        assert_eq!(pixel(35, 18), [73, 70, 74, 255]);
+        assert_eq!(pixel(41, 18), [20, 19, 19, 255]);
     }
 
     #[test]
@@ -500,7 +501,7 @@ mod tests {
             battery_snapshot(4.0, DeviceState::Discharging),
         );
 
-        let offset = ((18 * width + 11) * 4) as usize;
+        let offset = ((18 * width + 10) * 4) as usize;
         assert_eq!(&pixels[offset..offset + 4], &[255, 180, 171, 255]);
     }
 
@@ -519,7 +520,7 @@ mod tests {
             1,
             battery_snapshot(50.0, DeviceState::Charging),
         );
-        let offset = ((12 * width + 22) * 4) as usize;
+        let offset = ((13 * width + 22) * 4) as usize;
         assert_eq!(&charging_pixels[offset..offset + 4], &[49, 48, 48, 255]);
 
         let mut discharging_pixels = vec![0; (width * height * 4) as usize];
