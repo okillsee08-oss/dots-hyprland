@@ -1,4 +1,7 @@
-use std::{env, fs, path::{Path, PathBuf}};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -103,17 +106,9 @@ impl WorkspaceBarConfig {
 
 /// Battery options read from the existing upstream Illogical Impulse JSON.
 /// Invalid or out-of-range values fall back independently to upstream defaults.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct BatteryConfig {
     pub thresholds: BatteryThresholds,
-}
-
-impl Default for BatteryConfig {
-    fn default() -> Self {
-        Self {
-            thresholds: BatteryThresholds::default(),
-        }
-    }
 }
 
 impl BatteryConfig {
@@ -126,8 +121,18 @@ impl BatteryConfig {
         Self {
             thresholds: BatteryThresholds {
                 low_percent: battery_percent(&root, "/battery/low", defaults.low_percent, 100),
-                critical_percent: battery_percent(&root, "/battery/critical", defaults.critical_percent, 100),
-                suspend_percent: battery_percent(&root, "/battery/suspend", defaults.suspend_percent, 100),
+                critical_percent: battery_percent(
+                    &root,
+                    "/battery/critical",
+                    defaults.critical_percent,
+                    100,
+                ),
+                suspend_percent: battery_percent(
+                    &root,
+                    "/battery/suspend",
+                    defaults.suspend_percent,
+                    100,
+                ),
                 full_percent: battery_percent(&root, "/battery/full", defaults.full_percent, 101),
                 automatic_suspend: root
                     .pointer("/battery/automaticSuspend")
@@ -261,7 +266,10 @@ mod tests {
         assert_eq!(partial.thresholds.suspend_percent, 3);
         assert_eq!(partial.thresholds.full_percent, 101);
         assert!(partial.thresholds.automatic_suspend);
-        assert_eq!(BatteryConfig::from_upstream_json("not-json"), BatteryConfig::default());
+        assert_eq!(
+            BatteryConfig::from_upstream_json("not-json"),
+            BatteryConfig::default()
+        );
     }
 
     #[test]
