@@ -1,5 +1,13 @@
 use cosmic_text::{Attrs, Buffer, Color, FontSystem, Metrics, Shaping, SwashCache};
 
+/// Layout and foreground used by the shared text renderer.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TextStyle {
+    pub origin: (i32, i32),
+    pub font_size: f32,
+    pub color: (u8, u8, u8, u8),
+}
+
 /// One process-wide font database and glyph cache. Widgets borrow this engine
 /// instead of constructing independent font systems and raster caches.
 pub struct TextEngine {
@@ -26,53 +34,37 @@ impl TextEngine {
         origin: (i32, i32),
         font_size: f32,
     ) {
-        let mut buffer = Buffer::new(
-            &mut self.font_system,
-            Metrics::new(font_size, font_size * 1.35),
-        );
-        let mut buffer = buffer.borrow_with(&mut self.font_system);
-        buffer.set_size(
-            Some(width.saturating_sub(origin.0.max(0) as u32) as f32),
-            Some(height.saturating_sub(origin.1.max(0) as u32) as f32),
-        );
-        buffer.set_text(text, &Attrs::new(), Shaping::Advanced, None);
-
-        let mut target = TextCanvas {
+        self.draw_text_styled(
             pixels,
             width,
             height,
-            origin,
-        };
-        buffer.draw(
-            &mut self.swash_cache,
-            Color::rgba(235, 231, 232, 255),
-            |x, y, span_width, span_height, color| {
-                target.blend_span(x, y, span_width, span_height, color);
+            text,
+            TextStyle {
+                origin,
+                font_size,
+                color: (235, 231, 232, 255),
             },
         );
     }
 
-    /// Draw text using an explicit RGBA foreground color. The shared font
-    /// system and glyph cache are still reused; this is used by clipped UI
-    /// elements that need a contrasting foreground.
-    pub fn draw_text_color(
+    /// Draw text with a custom foreground while reusing the process-wide font
+    /// system and glyph cache.
+    pub fn draw_text_styled(
         &mut self,
         pixels: &mut [u8],
         width: u32,
         height: u32,
         text: &str,
-        origin: (i32, i32),
-        font_size: f32,
-        color: (u8, u8, u8, u8),
+        style: TextStyle,
     ) {
         let mut buffer = Buffer::new(
             &mut self.font_system,
-            Metrics::new(font_size, font_size * 1.35),
+            Metrics::new(style.font_size, style.font_size * 1.35),
         );
         let mut buffer = buffer.borrow_with(&mut self.font_system);
         buffer.set_size(
-            Some(width.saturating_sub(origin.0.max(0) as u32) as f32),
-            Some(height.saturating_sub(origin.1.max(0) as u32) as f32),
+            Some(width.saturating_sub(style.origin.0.max(0) as u32) as f32),
+            Some(height.saturating_sub(style.origin.1.max(0) as u32) as f32),
         );
         buffer.set_text(text, &Attrs::new(), Shaping::Advanced, None);
 
@@ -80,11 +72,11 @@ impl TextEngine {
             pixels,
             width,
             height,
-            origin,
+            origin: style.origin,
         };
         buffer.draw(
             &mut self.swash_cache,
-            Color::rgba(color.0, color.1, color.2, color.3),
+            Color::rgba(style.color.0, style.color.1, style.color.2, style.color.3),
             |x, y, span_width, span_height, color| {
                 target.blend_span(x, y, span_width, span_height, color);
             },
@@ -168,7 +160,17 @@ mod tests {
         let mut engine = TextEngine::new();
         let mut pixels = vec![255; 160 * 36 * 4];
 
-        engine.draw_text_color(&mut pixels, 160, 36, "50%", (8, 5), 14.0, (25, 40, 55, 255));
+        engine.draw_text_styled(
+            &mut pixels,
+            160,
+            36,
+            "50%",
+            TextStyle {
+                origin: (8, 5),
+                font_size: 14.0,
+                color: (25, 40, 55, 255),
+            },
+        );
 
         assert!(pixels.chunks_exact(4).any(|pixel| {
             pixel[0] < 200 && pixel[1] < 210 && pixel[2] < 220 && pixel[3] == 255
