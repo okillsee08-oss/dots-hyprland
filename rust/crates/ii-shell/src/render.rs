@@ -64,12 +64,14 @@ pub fn draw_battery_indicator(
         pixels,
         buffer_width,
         buffer_height,
-        x,
-        y,
-        width,
-        height,
-        11 * scale,
-        [73, 70, 74, 255],
+        RoundedRectPixels {
+            x,
+            y,
+            width,
+            height,
+            radius: 11 * scale,
+            color: [73, 70, 74, 255],
+        },
     );
 
     let percentage = if snapshot.percentage.is_finite() {
@@ -88,12 +90,14 @@ pub fn draw_battery_indicator(
             pixels,
             buffer_width,
             buffer_height,
-            x,
-            y,
-            fill_width,
-            height,
-            2 * scale,
-            fill_color,
+            RoundedRectPixels {
+                x,
+                y,
+                width: fill_width,
+                height,
+                radius: 2 * scale,
+                color: fill_color,
+            },
         );
     }
 
@@ -119,44 +123,49 @@ pub fn draw_battery_indicator(
     }
 }
 
+#[derive(Clone, Copy)]
+struct RoundedRectPixels {
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    radius: i32,
+    color: [u8; 4],
+}
+
 fn fill_rounded_rect_pixels(
     pixels: &mut [u8],
     buffer_width: u32,
     buffer_height: u32,
-    x: i32,
-    y: i32,
-    rect_width: i32,
-    rect_height: i32,
-    radius: i32,
-    color: [u8; 4],
+    rect: RoundedRectPixels,
 ) {
-    if rect_width <= 0 || rect_height <= 0 {
+    if rect.width <= 0 || rect.height <= 0 {
         return;
     }
 
-    let right = x.saturating_add(rect_width).min(buffer_width as i32);
-    let bottom = y.saturating_add(rect_height).min(buffer_height as i32);
-    let left = x.max(0);
-    let top = y.max(0);
+    let right = rect.x.saturating_add(rect.width).min(buffer_width as i32);
+    let bottom = rect.y.saturating_add(rect.height).min(buffer_height as i32);
+    let left = rect.x.max(0);
+    let top = rect.y.max(0);
     if left >= right || top >= bottom {
         return;
     }
 
-    let radius = radius.max(0).min(rect_width / 2).min(rect_height / 2);
+    let radius = rect.radius.max(0).min(rect.width / 2).min(rect.height / 2);
     let radius_squared = i64::from(radius) * i64::from(radius);
     for py in top..bottom {
-        let nearest_y = if py < y + radius {
-            y + radius
-        } else if py >= y + rect_height - radius {
-            y + rect_height - radius - 1
+        let nearest_y = if py < rect.y + radius {
+            rect.y + radius
+        } else if py >= rect.y + rect.height - radius {
+            rect.y + rect.height - radius - 1
         } else {
             py
         };
         for px in left..right {
-            let nearest_x = if px < x + radius {
-                x + radius
-            } else if px >= x + rect_width - radius {
-                x + rect_width - radius - 1
+            let nearest_x = if px < rect.x + radius {
+                rect.x + radius
+            } else if px >= rect.x + rect.width - radius {
+                rect.x + rect.width - radius - 1
             } else {
                 px
             };
@@ -164,7 +173,7 @@ fn fill_rounded_rect_pixels(
             let dy = i64::from(py - nearest_y);
             if radius == 0 || dx * dx + dy * dy <= radius_squared {
                 let offset = ((py as usize * buffer_width as usize) + px as usize) * 4;
-                pixels[offset..offset + 4].copy_from_slice(&color);
+                pixels[offset..offset + 4].copy_from_slice(&rect.color);
             }
         }
     }
