@@ -520,7 +520,7 @@ mod tests {
             1,
             battery_snapshot(50.0, DeviceState::Charging),
         );
-        let offset = ((13 * width + 22) * 4) as usize;
+        let offset = ((11 * width + 20) * 4) as usize;
         assert_eq!(&charging_pixels[offset..offset + 4], &[49, 48, 48, 255]);
 
         let mut discharging_pixels = vec![0; (width * height * 4) as usize];
