@@ -375,8 +375,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 if battery_changed {
                     eprintln!(
                         "ii-shell: battery thresholds changed: {:?} -> {:?}",
-                        shell.battery_thresholds,
-                        next_battery_thresholds
+                        shell.battery_thresholds, next_battery_thresholds
                     );
                     shell.battery_thresholds = next_battery_thresholds;
                     shell.battery_snapshot = shell
