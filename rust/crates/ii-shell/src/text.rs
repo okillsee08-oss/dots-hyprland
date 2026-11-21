@@ -168,15 +168,7 @@ mod tests {
         let mut engine = TextEngine::new();
         let mut pixels = vec![255; 160 * 36 * 4];
 
-        engine.draw_text_color(
-            &mut pixels,
-            160,
-            36,
-            "50%",
-            (8, 5),
-            14.0,
-            (25, 40, 55, 255),
-        );
+        engine.draw_text_color(&mut pixels, 160, 36, "50%", (8, 5), 14.0, (25, 40, 55, 255));
 
         assert!(pixels.chunks_exact(4).any(|pixel| {
             pixel[0] < 200 && pixel[1] < 210 && pixel[2] < 220 && pixel[3] == 255
