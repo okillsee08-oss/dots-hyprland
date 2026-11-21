@@ -253,3 +253,49 @@ Hard constraints:
 - [PR #4](https://github.com/okillsee08-oss/dots-hyprland/pull/4), "Add private D-Bus integration coverage for UPower", was merged after the PR-triggered Actions [run #106](https://github.com/okillsee08-oss/dots-hyprland/actions/runs/44778255478) passed Format, Check, Test and Clippy. Its Test step passed 108 Rust workspace tests plus 3 config-watcher tests (111 total).
 - GitHub confirmed merge commit [564c4ea](https://github.com/okillsee08-oss/dots-hyprland/commit/564c4ea153c15953e127e8473f468ff45b303d62). The rust-port/phase-0 ref was then advanced from PR head 9d19000 to that merge commit using a normal fast-forward update; no force-push or history rewrite was used.
 - This is a validation/test-infrastructure integration, not a new live battery service feature. The mock service runs on an isolated session bus and does not replace a real UPower system-bus or NixOS/Hyprland runtime test.
+
+## Native clipped battery indicator (2026-11-21)
+
+- At the start of this run, verified rust-port/phase-0 at
+  8f9820b27e80406f23f9013ca8a3eeaae26ecc13; main is at
+  564c4ea153c15953e127e8473f468ff45b303d62. The feature branch was one
+  documentation-only commit ahead and zero behind. The latest upstream
+  end-4/dots-hyprland revision remains
+  21733c3ca7f4edc20faafedea844dc96002c6f7f (2026-11-15); no newer upstream
+  commit was found.
+- Re-inspected upstream services/Battery.qml,
+  modules/ii/bar/BatteryIndicator.qml, BatteryPopup.qml,
+  modules/common/widgets/ClippedProgressBar.qml,
+  modules/common/widgets/MaterialSymbol.qml, modules/common/Icons.qml,
+  modules/common/Appearance.qml, and modules/common/Config.qml.
+  The upstream indicator uses a 56-by-22 logical clipped progress area,
+  error-colored fill when low and not charging, and a charging bolt below
+  100%; its text is clipped out of the fill. The native implementation uses
+  the same logical dimensions and state conditions, a dark contrasting text
+  foreground, and a small fixed vector bolt.
+- Added draw_battery_indicator to render.rs. It paints a rounded track,
+  proportional fill and charging bolt directly into the caller-owned SHM
+  buffer; it allocates no intermediate pixmap, icon or path and creates no
+  worker/timer. The bar is reserved at a fixed width before the clock so the
+  active-window title cannot overlap it.
+- Added TextEngine::draw_text_color so the percentage can use a contrasting
+  foreground while reusing the process-wide cosmic-text font system and glyph
+  cache. Existing text rendering behavior remains unchanged.
+- Added pixel-level tests for proportional fill/track colors, low-battery
+  color, charging-bolt visibility (including fully charged state), zero scale,
+  unavailable devices and undersized buffers. Added a custom text-color test.
+- Updated rust/README.md and this status record. No upstream QML,
+  configuration, scripts, assets or license files were changed.
+- Source commits: 4bafe5460687369ce0f2a27522f99afb4bcf558f (colored text),
+  e88175683b785ebfc1f1cb9147297d863133b490 (indicator renderer),
+  b29895308477320fa56b0cffcdff036bdbaf2819 (panel integration), and
+  706fda1224dc088ed58de0ff9d07e84e671bdba7 (edge-case test corrections).
+  README commit: 6e057ac88f512c70ef9a9db89baeb7b0d236c40c.
+- This hosted environment has no cargo or rustc; local formatting,
+  compilation, tests and Clippy cannot be run here. GitHub Actions verification
+  is pending. No component has been merged to main in this update.
+- Remaining battery parity includes parsing the user-configured thresholds,
+  the detailed popup, low/critical/full notifications and sounds, and guarded
+  automatic suspend. A real system UPower service, NixOS/Hyprland compositor,
+  and RSS/PSS/wakeup/frame-time benchmarks remain untested.
+
