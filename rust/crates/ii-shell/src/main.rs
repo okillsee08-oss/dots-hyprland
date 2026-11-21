@@ -930,14 +930,16 @@ impl RustShell {
                 let charging_bolt_visible = snapshot.is_charging && snapshot.percentage < 1.0;
                 let bolt_offset = if charging_bolt_visible { 4 * scale } else { 0 };
                 let label_x = battery_x + (indicator_width - label_width).max(0) / 2 + bolt_offset;
-                text.draw_text_color(
+                text.draw_text_styled(
                     pixels,
                     geometry.buffer_width,
                     geometry.buffer_height,
                     label,
-                    (label_x, 8 * scale),
-                    10.0 * scale as f32,
-                    (49, 48, 48, 255),
+                    text::TextStyle {
+                        origin: (label_x, 8 * scale),
+                        font_size: 10.0 * scale as f32,
+                        color: (49, 48, 48, 255),
+                    },
                 );
             }
             if let Some(clock_x) = clock_x {
