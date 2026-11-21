@@ -157,6 +157,23 @@ impl BatterySnapshot {
         }
     }
 
+    /// Re-evaluate threshold-derived flags without another D-Bus round trip.
+    /// The shell uses this when the existing upstream config file changes.
+    pub fn with_thresholds(mut self, thresholds: BatteryThresholds) -> Self {
+        let percent = self.percentage * 100.0;
+        self.is_low = self.available && percent <= f64::from(thresholds.low_percent);
+        self.is_critical = self.available && percent <= f64::from(thresholds.critical_percent);
+        self.is_suspending = self.available && percent <= f64::from(thresholds.suspend_percent);
+        self.is_full = self.available && percent >= f64::from(thresholds.full_percent);
+        self.is_low_and_not_charging = self.is_low && !self.is_charging;
+        self.is_critical_and_not_charging = self.is_critical && !self.is_charging;
+        self.should_automatic_suspend = self.available
+            && thresholds.automatic_suspend
+            && self.is_suspending
+            && !self.is_charging;
+        self.is_full_and_charging = self.is_full && self.is_charging;
+        self
+    }
     /// The estimate selected by the upstream popup: time-to-full only while
     /// the state is exactly Charging; all other states use time-to-empty.
     pub fn estimated_time_seconds(self) -> Option<u64> {
@@ -240,6 +257,40 @@ mod tests {
             energy_full: Some(45.0),
             energy_full_design: Some(50.0),
         }
+    }
+
+    #[test]
+    fn reprojects_threshold_flags_without_changing_battery_measurements() {
+        let mut input = properties();
+        input.percentage_percent = 4.0;
+        let original = BatterySnapshot::from_upower(input, BatteryThresholds::default());
+        assert!(original.is_low);
+        assert!(original.is_critical);
+        assert!(!original.is_suspending);
+
+        let custom = original.with_thresholds(BatteryThresholds {
+            low_percent: 10,
+            critical_percent: 5,
+            suspend_percent: 5,
+            full_percent: 101,
+            automatic_suspend: true,
+        });
+        assert!(custom.is_low);
+        assert!(custom.is_critical);
+        assert!(custom.is_suspending);
+        assert!(custom.should_automatic_suspend);
+
+        let disabled = original.with_thresholds(BatteryThresholds {
+            low_percent: 10,
+            critical_percent: 5,
+            suspend_percent: 5,
+            full_percent: 101,
+            automatic_suspend: false,
+        });
+        assert!(disabled.is_suspending);
+        assert!(!disabled.should_automatic_suspend);
+        assert_eq!(disabled.percentage, original.percentage);
+        assert_eq!(disabled.change_rate_w, original.change_rate_w);
     }
 
     #[test]

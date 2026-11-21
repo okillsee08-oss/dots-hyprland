@@ -35,7 +35,7 @@ The Hyprland compositor remains responsible for windows and composition. This pr
 - `crates/ii-shell/src/render.rs`: software rendering primitives.
 - `crates/ii-shell/src/text.rs`: a shared cosmic-text font system and glyph cache.
 - `crates/ii-shell/src/bus.rs`: shared D-Bus session connection boundary.
-- `crates/ii-shell/src/battery.rs`: pure UPower battery-state projection, upstream threshold and icon-level mapping, health/time-estimate normalization, and edge-case tests; it performs no D-Bus I/O or power actions.
+- `crates/ii-shell/src/battery.rs`: pure UPower battery-state projection, upstream threshold and icon-level mapping, health/time-estimate normalization, and edge-case tests; threshold-derived flags can be reprojected after live config reload, with no D-Bus I/O or power actions.
 - `crates/ii-shell/src/bus.rs`: shared system- and session-bus connection constructors; adapters receive shared connection handles rather than opening per-widget connections.
 - `crates/ii-shell/src/upower.rs`: asynchronous UPower system-bus adapter using `GetDisplayDevice`, one `Properties.GetAll` snapshot, and a filtered `PropertiesChanged` stream; it creates no connection or worker thread.
 - `crates/ii-shell/src/battery_runtime.rs`: one bounded UPower worker with a latest-snapshot mailbox and Linux eventfd wakeup, allowing the blocking Wayland/Hyprland loop to consume updates without D-Bus work or an unbounded queue.
@@ -43,7 +43,7 @@ The Hyprland compositor remains responsible for windows and composition. This pr
 - `crates/ii-shell/src/window_presentation.rs`: focused-monitor active app/title projection and largest-workspace-window fallback for other outputs, with safe label truncation.
 - `crates/ii-shell/src/window_inventory.rs`: pure largest-area client selection per workspace, preserving upstream tie behavior.
 - `crates/ii-shell/src/icon_lookup.rs`: XDG desktop-entry and icon-theme lookup, AppSearch-style class guessing, bounded `index.theme` inheritance, path-safe directory resolution, bounded PNG decoding and a 128-entry lazy icon cache.
-- `crates/ii-shell/src/config.rs`: versionable shell settings model and read-only parsing of upstream `bar.workspaces.shown` and `bar.workspaces.showAppIcons` options from `~/.config/illogical-impulse/config.json`; `ii-shell` watches that file's parent directory with inotify and reloads both settings through its existing poll loop.
+- `crates/ii-shell/src/config.rs`: versionable shell settings model and read-only parsing of upstream workspace-bar options plus `battery.low`, `battery.critical`, `battery.suspend`, `battery.full`, and `battery.automaticSuspend` from `~/.config/illogical-impulse/config.json`; `ii-shell` watches that file's parent directory with inotify and reloads both settings groups through its existing poll loop.
 - `crates/ii-shell/src/output_model.rs`: checked logical-to-buffer geometry for output-bound panels.
 - `crates/ii-shell/src/hyprland_ipc.rs`: bounded typed Hyprland monitor/workspace/active-window/client queries and validated workspace dispatch.
 - `crates/ii-shell/src/workspace_model.rs`: per-monitor workspace grouping, occupancy projection, largest-client projection for each visible slot, and logical-coordinate pointer hit testing.
@@ -82,10 +82,15 @@ Existing QML remains the behavioral reference until the corresponding native sub
 
 ## Config reload behavior
 
-The workspace-slot watcher observes the existing `~/.config/illogical-impulse`
+The config watcher observes the existing `~/.config/illogical-impulse`
 directory with inotify and is registered in the same blocking event loop as
-Wayland and Hyprland. It reloads `bar.workspaces.shown` and
-`bar.workspaces.showAppIcons`; the upstream configuration remains read-only.
+Wayland and Hyprland. It reloads `bar.workspaces.shown`,
+`bar.workspaces.showAppIcons`, and the upstream battery threshold keys
+`battery.low`, `battery.critical`, `battery.suspend`, `battery.full`, and
+`battery.automaticSuspend`; the upstream configuration remains read-only.
+Invalid battery values fall back individually to the corresponding upstream
+defaults. Existing battery snapshots are reprojected immediately, without
+restarting the UPower monitor or waiting for another D-Bus signal.
 The parent directory must exist when the shell starts. If it is created later,
 restart the shell to arm the watch.
 
@@ -197,5 +202,6 @@ worker is created; updates remain driven by battery snapshot changes.
 
 Pixel-level tests cover proportional fill, track color, low-battery color,
 charging-bolt visibility, zero scale, unavailable devices, and short buffers.
-Configurable battery thresholds, the popup, notifications, sounds, and guarded
-suspend behavior remain separate parity work.
+Battery thresholds now load and live-reload from the existing upstream JSON
+configuration. The detailed popup, notifications, sounds, and guarded suspend
+action remain separate parity work.

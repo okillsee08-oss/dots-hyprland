@@ -344,6 +344,37 @@ Hard constraints:
 - Repositioned the charging bolt and percentage overlay to fit the smaller
   track. Added an outside-track pixel assertion so the fixed width is tested.
 - Updated rust/README.md and this status record. The original upstream QML
-  remains unchanged. The correction is on rust-port/phase-0 and awaits CI;
-  it will not be merged to main unless all four required checks pass.
+  remains unchanged. PR #6 was merged after GitHub Actions run #133 passed
+  Format, Check, Test and Clippy. GitHub confirmed merge commit
+  [5c06faa](https://github.com/okillsee08-oss/dots-hyprland/commit/5c06faac36a995818b4573f6de77ccf0c8499e73).
 
+
+
+## Upstream battery threshold configuration (2026-11-21)
+
+- Re-inspected upstream `modules/common/Config.qml`, `services/Battery.qml`,
+  and `modules/settings/GeneralConfig.qml` at upstream revision
+  [21733c3](https://github.com/end-4/dots-hyprland/commit/21733c3ca7f4edc20faafedea844dc96002c6f7f).
+  The upstream root-level `battery` object defines `low=20`,
+  `critical=5`, `full=101`, `automaticSuspend=true`, and `suspend=3`.
+  The settings UI permits 0–100 for low/critical/suspend and 0–101 for full.
+- Added `BatteryConfig` in `config.rs` to read those exact keys from the
+  existing `~/.config/illogical-impulse/config.json` without writing or
+  normalizing the user-owned file. Missing, malformed, wrong-typed, negative,
+  or out-of-range values fall back independently to upstream defaults.
+- Added `BatterySnapshot::with_thresholds` so threshold-derived flags can be
+  recomputed from the current immutable snapshot without another D-Bus round
+  trip. The existing inotify config watcher now reloads battery thresholds
+  together with workspace-bar settings; the panel redraws immediately when
+  they change. The UPower monitor is not restarted.
+- The monitor starts with the configured thresholds, and each incoming
+  snapshot is reprojected on the Wayland thread using the latest config. This
+  keeps the D-Bus worker independent of user-config reloads. Automatic suspend
+  remains a model flag only; no suspend command is executed.
+- Added parser tests for all configured keys, accepted boundaries, malformed
+  values, partial configuration and invalid JSON, plus a model test proving
+  threshold changes immediately alter low/critical/suspend flags without
+  changing battery measurements.
+- No upstream QML, configuration, scripts, assets or license files were
+  modified. Real UPower, NixOS/Hyprland and memory/performance validation remain
+  outstanding.

@@ -15,7 +15,7 @@ use ii_shell::{
     battery::{BatterySnapshot, BatteryThresholds},
     battery_runtime::BatteryMonitorWorker,
     clock::ClockState,
-    config::WorkspaceBarConfig,
+    config::{BatteryConfig, WorkspaceBarConfig},
     hyprland_ipc::{ActiveWindow, HyprlandIpc, WorkspaceCommand, WorkspaceDirection},
     hyprland_state::HyprlandState,
     icon_lookup::IconResolver,
@@ -117,6 +117,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let pool = SlotPool::new((INITIAL_WIDTH * PANEL_HEIGHT * 4) as usize, &shm)?;
     let command_worker = HyprlandCommandWorker::spawn()?;
     let workspace_bar_config = WorkspaceBarConfig::load();
+    let battery_thresholds = BatteryConfig::load().thresholds;
     let workspace_shown_count = workspace_bar_config.shown;
     let workspace_show_app_icons = workspace_bar_config.show_app_icons;
     let mut config_watcher = match workspace_config_path() {
@@ -162,12 +163,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         workspace_models: HashMap::new(),
         workspace_shown_count,
         workspace_show_app_icons,
+        battery_thresholds,
         battery_snapshot: None,
         workspace_models_dirty: false,
         closed: false,
     };
 
-    let mut battery_monitor = match BatteryMonitorWorker::spawn(BatteryThresholds::default()) {
+    let mut battery_monitor = match BatteryMonitorWorker::spawn(battery_thresholds) {
         Ok(monitor) => {
             eprintln!("ii-shell: started shared UPower battery monitor");
             Some(monitor)
@@ -347,12 +349,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                 config_watcher = None;
             }
             if reload_config {
-                let next_config = WorkspaceBarConfig::load();
-                let next_count = next_config.shown;
-                let next_show_app_icons = next_config.show_app_icons;
-                if next_count != shell.workspace_shown_count
-                    || next_show_app_icons != shell.workspace_show_app_icons
-                {
+                let next_workspace_config = WorkspaceBarConfig::load();
+                let next_count = next_workspace_config.shown;
+                let next_show_app_icons = next_workspace_config.show_app_icons;
+                let workspace_changed = next_count != shell.workspace_shown_count
+                    || next_show_app_icons != shell.workspace_show_app_icons;
+
+                if workspace_changed {
                     eprintln!(
                         "ii-shell: workspace bar config changed (shown: {} -> {}, app icons: {} -> {})",
                         shell.workspace_shown_count,
@@ -365,11 +368,26 @@ fn main() -> Result<(), Box<dyn Error>> {
                     if let Some(runtime) = hyprland.as_ref() {
                         shell.update_workspace_models(runtime.state());
                     }
+                }
+
+                let next_battery_thresholds = BatteryConfig::load().thresholds;
+                let battery_changed = next_battery_thresholds != shell.battery_thresholds;
+                if battery_changed {
+                    eprintln!(
+                        "ii-shell: battery thresholds changed: {:?} -> {:?}",
+                        shell.battery_thresholds, next_battery_thresholds
+                    );
+                    shell.battery_thresholds = next_battery_thresholds;
+                    shell.battery_snapshot = shell
+                        .battery_snapshot
+                        .map(|snapshot| snapshot.with_thresholds(next_battery_thresholds));
+                }
+
+                if workspace_changed || battery_changed {
                     shell.request_redraw_all(&queue_handle)?;
                 }
             }
         }
-
         let battery_ready =
             descriptors[3].revents & (libc::POLLIN | libc::POLLERR | libc::POLLHUP) != 0;
         if battery_ready {
@@ -377,6 +395,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             if let Some(monitor) = battery_monitor.as_ref() {
                 match monitor.take_latest() {
                     Ok(Some(snapshot)) => {
+                        let snapshot = snapshot.with_thresholds(shell.battery_thresholds);
                         if shell.battery_snapshot != Some(snapshot) {
                             shell.battery_snapshot = Some(snapshot);
                             shell.request_redraw_all(&queue_handle)?;
@@ -450,6 +469,7 @@ struct RustShell {
     workspace_models: HashMap<u32, WorkspaceModel>,
     workspace_shown_count: usize,
     workspace_show_app_icons: bool,
+    battery_thresholds: BatteryThresholds,
     battery_snapshot: Option<BatterySnapshot>,
     workspace_models_dirty: bool,
     closed: bool,
