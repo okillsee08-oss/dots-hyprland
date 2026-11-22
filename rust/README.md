@@ -204,8 +204,9 @@ worker is created; updates remain driven by battery snapshot changes.
 Pixel-level tests cover proportional fill, track color, low-battery color,
 charging-bolt visibility, zero scale, unavailable devices, and short buffers.
 Battery thresholds now load and live-reload from the existing upstream JSON
-configuration. The detailed popup, notifications, sounds, and guarded suspend
-action remain separate parity work.
+configuration. The popup content model is in place, but its visible Wayland
+surface, notifications, sounds, and guarded suspend action remain separate
+parity work.
 
 
 ## Battery popup content model
