@@ -423,8 +423,8 @@ Hard constraints:
   presentation, the 0.01 W visibility boundary, missing estimates, minute
   formatting, unsupported/invalid health, unavailable devices, and non-finite
   power rates.
-- Updated `rust/README.md`. This is only a tested-in-source content-model
-  foundation; no visible popup surface, renderer, hover interaction, or
+- Updated `rust/README.md`. This is only a unit-test-covered content-model
+  foundation pending CI execution; no visible popup surface, renderer, hover interaction, or
   activation behavior has been implemented yet. It performs no D-Bus I/O,
   rendering, notification, sound, or power action.
 - Source commits:
@@ -437,14 +437,12 @@ Hard constraints:
   [49db6de](https://github.com/okillsee08-oss/dots-hyprland/commit/49db6de73e8d07789866ddd743a339b4b8fa060a)
   (README wording clarification).
 - Open review:
-  [PR #8](https://github.com/okillsee08-oss/dots-hyprland/pull/8).
-  GitHub reports the PR as mergeable, but no Actions workflow run or commit
-  status was returned for final head
-  [49db6de](https://github.com/okillsee08-oss/dots-hyprland/commit/49db6de73e8d07789866ddd743a339b4b8fa060a)
-  during this run. The branch compare reports six commits ahead of `main`
-  and zero behind. The available execution environment has no `cargo` or `rustc`, so `cargo fmt --check`,
-  `cargo check`, `cargo test`, and Clippy have not been run. Do not merge
-  until the four required checks have actually passed.
+  [PR #8](https://github.com/okillsee08-oss/dots-hyprland/pull/8) remains open
+  and unmerged. No Actions workflow run or combined commit status was returned
+  for its current head after the final documentation updates. The available
+  execution environment has no `cargo` or `rustc`, so
+  `cargo fmt --check`, `cargo check`, `cargo test`, and Clippy have not
+  been run. Do not merge until all four required checks have actually passed.
 - No component was merged into `main` in this run. The popup model remains
   on `rust-port/phase-0` pending verification. No real UPower, NixOS/Hyprland,
   accessibility, or memory/performance validation is claimed.
