@@ -438,11 +438,13 @@ Hard constraints:
   (README wording clarification).
 - Open review:
   [PR #8](https://github.com/okillsee08-oss/dots-hyprland/pull/8) remains open
-  and unmerged. No Actions workflow run or combined commit status was returned
-  for its current head after the final documentation updates. The available
-  execution environment has no `cargo` or `rustc`, so
-  `cargo fmt --check`, `cargo check`, `cargo test`, and Clippy have not
-  been run. Do not merge until all four required checks have actually passed.
+  and unmerged. The Rust workflow is configured for push, pull-request, and
+  manual dispatch, but GitHub rejected a manual dispatch with HTTP 422:
+  Actions has been disabled for this repository. No Actions run or combined
+  commit status is available for this PR. Both the local and remote execution
+  sandboxes lack `cargo` and `rustc`, so `cargo fmt --check`,
+  `cargo check`, `cargo test`, and Clippy could not be run. Do not merge
+  until Actions is re-enabled and all four required checks pass.
 - No component was merged into `main` in this run. The popup model remains
   on `rust-port/phase-0` pending verification. No real UPower, NixOS/Hyprland,
   accessibility, or memory/performance validation is claimed.
