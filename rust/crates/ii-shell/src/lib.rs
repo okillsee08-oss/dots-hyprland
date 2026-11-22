@@ -1,5 +1,6 @@
 pub mod battery;
 pub mod battery_runtime;
+pub mod battery_popup;
 pub mod bus;
 pub mod clock;
 pub mod config;
