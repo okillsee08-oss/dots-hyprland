@@ -433,12 +433,16 @@ Hard constraints:
   [788d061](https://github.com/okillsee08-oss/dots-hyprland/commit/788d0610336c9c6a00a5166a2f9169b341a66188)
   (module export), and
   [14b19f2](https://github.com/okillsee08-oss/dots-hyprland/commit/14b19f28c31777fbb67bf3ca7ccb29c747efa6ec)
-  (README).
+  (README), and
+  [49db6de](https://github.com/okillsee08-oss/dots-hyprland/commit/49db6de73e8d07789866ddd743a339b4b8fa060a)
+  (README wording clarification).
 - Open review:
   [PR #8](https://github.com/okillsee08-oss/dots-hyprland/pull/8).
   GitHub reports the PR as mergeable, but no Actions workflow run or commit
-  status was returned for its head during this run. The available execution
-  environment has no `cargo` or `rustc`, so `cargo fmt --check`,
+  status was returned for final head
+  [49db6de](https://github.com/okillsee08-oss/dots-hyprland/commit/49db6de73e8d07789866ddd743a339b4b8fa060a)
+  during this run. The branch compare reports six commits ahead of `main`
+  and zero behind. The available execution environment has no `cargo` or `rustc`, so `cargo fmt --check`,
   `cargo check`, `cargo test`, and Clippy have not been run. Do not merge
   until the four required checks have actually passed.
 - No component was merged into `main` in this run. The popup model remains
