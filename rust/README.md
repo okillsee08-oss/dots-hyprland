@@ -39,6 +39,7 @@ The Hyprland compositor remains responsible for windows and composition. This pr
 - `crates/ii-shell/src/bus.rs`: shared system- and session-bus connection constructors; adapters receive shared connection handles rather than opening per-widget connections.
 - `crates/ii-shell/src/upower.rs`: asynchronous UPower system-bus adapter using `GetDisplayDevice`, one `Properties.GetAll` snapshot, and a filtered `PropertiesChanged` stream; it creates no connection or worker thread.
 - `crates/ii-shell/src/battery_runtime.rs`: one bounded UPower worker with a latest-snapshot mailbox and Linux eventfd wakeup, allowing the blocking Wayland/Hyprland loop to consume updates without D-Bus work or an unbounded queue.
+- `crates/ii-shell/src/battery_popup.rs`: on-demand projection of the upstream battery popup's time, power-rate, and health rows from one immutable snapshot; no additional D-Bus work, worker, or polling.
 - `crates/ii-shell/src/clock.rs`: local-time clock snapshot with minute/second precision and a poll-loop deadline aligned to the next clock boundary.
 - `crates/ii-shell/src/window_presentation.rs`: focused-monitor active app/title projection and largest-workspace-window fallback for other outputs, with safe label truncation.
 - `crates/ii-shell/src/window_inventory.rs`: pure largest-area client selection per workspace, preserving upstream tie behavior.
@@ -203,5 +204,29 @@ worker is created; updates remain driven by battery snapshot changes.
 Pixel-level tests cover proportional fill, track color, low-battery color,
 charging-bolt visibility, zero scale, unavailable devices, and short buffers.
 Battery thresholds now load and live-reload from the existing upstream JSON
-configuration. The detailed popup, notifications, sounds, and guarded suspend
-action remain separate parity work.
+configuration. The popup content model is in place, but its visible Wayland
+surface, notifications, sounds, and guarded suspend action remain separate
+parity work.
+
+
+## Battery popup content model
+
+The new `battery_popup.rs` module projects the latest `BatterySnapshot`
+into the three value rows from upstream `BatteryPopup.qml`: time to full or
+empty, signed charging/discharging rate (or the fully-charged status), and
+battery health. It preserves the upstream hour/minute formatting, signed
+two-decimal watt format, one-decimal health format, and the 0.0% fallback when
+health is not available.
+
+Quickshell's `changeRate` is positive while charging and negative while
+discharging. The popup preserves that sign in the watt row. Its time-row
+visibility check uses the absolute rate magnitude, so a discharging estimate
+is not accidentally hidden by the upstream QML's `power <= 0.01` condition.
+This is a deliberate correction to that sign-sensitive condition; both
+charging and discharging estimates remain visible above the 0.01 W threshold.
+Non-finite rates and health values are ignored.
+
+This is a pure content model, not yet a visible popup surface. It performs no
+D-Bus calls, rendering, notifications, sound playback, or suspend actions.
+The next UI step is a lazily created Wayland layer surface that consumes this
+model and is shown only while the battery indicator is hovered or activated.

@@ -378,3 +378,115 @@ Hard constraints:
 - No upstream QML, configuration, scripts, assets or license files were
   modified. Real UPower, NixOS/Hyprland and memory/performance validation remain
   outstanding.
+- [PR #7](https://github.com/okillsee08-oss/dots-hyprland/pull/7) was merged
+  after GitHub Actions [run #141](https://github.com/okillsee08-oss/dots-hyprland/actions/runs/44931226139)
+  passed Format, Check, Test and Clippy with warnings denied. The Test step
+  passed 118 Rust workspace tests and 3 config-watcher tests (121 total).
+- GitHub confirmed merge commit
+  [2e31957](https://github.com/okillsee08-oss/dots-hyprland/commit/2e31957d3174bb20a0eeef2d50c50b0946f033e7).
+  The development branch was advanced to the merge commit with a normal
+  expected-head fast-forward update; no force-push or history rewrite was used.
+- Initial formatting-only failures on the earlier attempts were corrected
+  before the final successful PR run. The hosted environment has no local
+  cargo/rustc, so all Rust checks ran in GitHub Actions.
+
+
+## Native battery popup content model (2026-11-22)
+
+- At the start of this run, verified `main` at
+  [2e31957](https://github.com/okillsee08-oss/dots-hyprland/commit/2e31957d3174bb20a0eeef2d50c50b0946f033e7)
+  and `rust-port/phase-0` at
+  [c085034](https://github.com/okillsee08-oss/dots-hyprland/commit/c085034e9e15e853de602a35812dc4139f5a15b0).
+  The development branch was one documentation-only commit ahead and zero
+  behind. The latest upstream revision remains
+  [21733c3](https://github.com/end-4/dots-hyprland/commit/21733c3ca7f4edc20faafedea844dc96002c6f7f)
+  (2026-11-15); no newer upstream commit was found.
+- Re-inspected upstream `services/Battery.qml`,
+  `modules/ii/bar/BatteryIndicator.qml`,
+  `modules/ii/bar/BatteryPopup.qml`,
+  `modules/common/widgets/ClippedProgressBar.qml`, and
+  `modules/common/Config.qml`. The popup has a time-to-full/empty row, a
+  charging/discharging wattage or fully-charged row, and an always-visible
+  health row. The time row is hidden for full state, absent/non-positive
+  estimates, and very low power rate.
+- Added `rust/crates/ii-shell/src/battery_popup.rs` and exported the module.
+  `BatteryPopupModel` projects the existing immutable `BatterySnapshot`
+  into typed time and power rows plus a health percentage. It preserves the
+  upstream hour/minute, two-decimal watt, and one-decimal health formatting,
+  including the 0.0% fallback when health is unsupported. It rejects
+  unavailable devices and non-finite input values.
+- The Rust battery model stores a signed change rate (positive while charging,
+  negative while discharging), so the popup's time-row threshold uses the
+  absolute rate magnitude while the label direction comes from UPower state.
+  This avoids accidentally hiding the discharging estimate due to sign.
+- Added eight unit tests for charging/discharging selection, fully charged
+  presentation, the 0.01 W visibility boundary, missing estimates, minute
+  formatting, unsupported/invalid health, unavailable devices, and non-finite
+  power rates.
+- Updated `rust/README.md`. This is only a unit-test-covered content-model
+  foundation pending CI execution; no visible popup surface, renderer, hover interaction, or
+  activation behavior has been implemented yet. It performs no D-Bus I/O,
+  rendering, notification, sound, or power action.
+- Source commits:
+  [ffe9697](https://github.com/okillsee08-oss/dots-hyprland/commit/ffe9697df3d5e70e0dcfaa2263c91c16ee43d74c)
+  (new model),
+  [788d061](https://github.com/okillsee08-oss/dots-hyprland/commit/788d0610336c9c6a00a5166a2f9169b341a66188)
+  (module export), and
+  [14b19f2](https://github.com/okillsee08-oss/dots-hyprland/commit/14b19f28c31777fbb67bf3ca7ccb29c747efa6ec)
+  (README), and
+  [49db6de](https://github.com/okillsee08-oss/dots-hyprland/commit/49db6de73e8d07789866ddd743a339b4b8fa060a)
+  (README wording clarification).
+- Open review:
+  [PR #8](https://github.com/okillsee08-oss/dots-hyprland/pull/8) remains open
+  and unmerged. The Rust workflow is configured for push, pull-request, and
+  manual dispatch, but GitHub rejected a manual dispatch with HTTP 422:
+  Actions has been disabled for this repository. No Actions run or combined
+  commit status is available for this PR. Both the local and remote execution
+  sandboxes lack `cargo` and `rustc`, so `cargo fmt --check`,
+  `cargo check`, `cargo test`, and Clippy could not be run. Do not merge
+  until Actions is re-enabled and all four required checks pass.
+- No component was merged into `main` in this run. The popup model remains
+  on `rust-port/phase-0` pending verification. No real UPower, NixOS/Hyprland,
+  accessibility, or memory/performance validation is claimed.
+- Next milestone: implement a lazily created, output-aware Wayland layer
+  surface for the popup. It should reuse the existing snapshot and text engine,
+  allocate buffers only while visible, close on pointer leave/outside click,
+  and preserve keyboard/pointer accessibility without a timer or new worker.
+
+
+## Battery popup signed-rate correction (2026-11-23)
+
+- Re-checked the current upstream `services/Battery.qml` and
+  `modules/ii/bar/BatteryPopup.qml` at
+  [upstream revision 21733c3](https://github.com/end-4/dots-hyprland/commit/21733c3ca7f4edc20faafedea844dc96002c6f7f).
+  `Battery.energyRate` is `UPower.displayDevice.changeRate`. The official
+  Quickshell UPowerDevice reference specifies that `changeRate` is positive
+  while charging and negative while discharging
+  ([UPowerDevice documentation](https://quickshell.org/docs/v0.3.2/types/Quickshell.Services.UPower/UPowerDevice/)).
+- The popup model previously converted the signed discharging rate to a
+  positive magnitude for its power row. It now preserves the signed value,
+  matching upstream's `Battery.energyRate.toFixed(2)` presentation
+  (for example, `-12.00W` while discharging and `4.25W` while charging).
+  Added/updated assertions for both the signed discharging value and the
+  low-rate boundary.
+- The time-row threshold intentionally continues to use absolute rate
+  magnitude. The upstream QML checks `power <= 0.01`; because discharging
+  `changeRate` is negative, that condition also hides valid time-to-empty
+  estimates. The native model keeps the useful time-to-empty row visible
+  above the 0.01 W magnitude threshold. This is a deliberate correctness fix,
+  not a literal reproduction of that sign-sensitive QML condition.
+- Updated `rust/README.md` to document the signed watt display and the
+  time-row correction. No upstream QML, configuration, scripts, assets or
+  license files were modified.
+- The change is part of open [PR #8](https://github.com/okillsee08-oss/dots-hyprland/pull/8).
+  GitHub Actions remains disabled for this repository: the PR head has no
+  workflow runs or combined status checks. This execution environment has no
+  `cargo` or `rustc`, so `cargo fmt --check`, `cargo check`,
+  `cargo test`, and Clippy could not be executed. The new/updated tests are
+  therefore added but unverified; PR #8 must not be merged until Actions is
+  re-enabled and all four checks pass.
+- No component was merged into `main` in this run. No live UPower service,
+  NixOS/Hyprland compositor, accessibility, or memory/performance validation
+  is claimed. Next: restore CI, verify PR #8, then implement the lazy,
+  output-aware Wayland popup surface using the shared text engine and existing
+  panel/event-loop resources.
