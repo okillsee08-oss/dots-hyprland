@@ -49,7 +49,9 @@ impl TimeEstimate {
     }
 }
 
-/// The status represented by the popup's bolt row.
+/// The status represented by the popup's bolt row. Watt values retain
+/// Quickshell's signed `changeRate` convention: positive while charging and
+/// negative while discharging.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PowerStatus {
     FullyCharged,
@@ -126,7 +128,8 @@ impl BatteryPopupModel {
         let power = if snapshot.state == DeviceState::FullyCharged {
             Some(PowerStatus::FullyCharged)
         } else if has_rate {
-            let watts = rate;
+            // Preserve the sign exposed by Quickshell's changeRate property.
+            let watts = snapshot.change_rate_w;
             Some(if snapshot.is_charging {
                 PowerStatus::Charging { watts }
             } else {
@@ -202,7 +205,8 @@ mod tests {
         assert_eq!(time.value_text(), "2h, 5m");
         let power = model.power.unwrap();
         assert_eq!(power.label(), "Discharging:");
-        assert_eq!(power.value_text(), "12.00W");
+        assert_eq!(power, PowerStatus::Discharging { watts: -12.0 });
+        assert_eq!(power.value_text(), "-12.00W");
         assert_eq!(model.health_value_text(), "90.0%");
     }
 
@@ -261,7 +265,7 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(low_rate.time, None);
-        assert_eq!(low_rate.power, Some(PowerStatus::Discharging { watts: 0.01 }));
+        assert_eq!(low_rate.power, Some(PowerStatus::Discharging { watts: -0.01 }));
 
         let positive_rate = BatteryPopupModel::from_snapshot(snapshot(
             DeviceState::Discharging,
