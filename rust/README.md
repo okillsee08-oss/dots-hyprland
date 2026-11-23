@@ -213,17 +213,18 @@ parity work.
 
 The new `battery_popup.rs` module projects the latest `BatterySnapshot`
 into the three value rows from upstream `BatteryPopup.qml`: time to full or
-empty, charging/discharging rate (or the fully-charged status), and battery
-health. It preserves the upstream hour/minute formatting, two-decimal watt
-format, one-decimal health format, and the 0.0% fallback when health is not
-available.
+empty, signed charging/discharging rate (or the fully-charged status), and
+battery health. It preserves the upstream hour/minute formatting, signed
+two-decimal watt format, one-decimal health format, and the 0.0% fallback when
+health is not available.
 
-The time row is omitted for a fully charged device, a missing/non-positive
-time estimate, or a power magnitude at or below 0.01 W. The Rust battery model
-stores a signed rate (positive while charging, negative while discharging), so
-the popup projection tests its absolute magnitude while deriving the displayed
-direction from the UPower state. This keeps both charging and discharging
-estimates visible. Non-finite rates and health values are ignored.
+Quickshell's `changeRate` is positive while charging and negative while
+discharging. The popup preserves that sign in the watt row. Its time-row
+visibility check uses the absolute rate magnitude, so a discharging estimate
+is not accidentally hidden by the upstream QML's `power <= 0.01` condition.
+This is a deliberate correction to that sign-sensitive condition; both
+charging and discharging estimates remain visible above the 0.01 W threshold.
+Non-finite rates and health values are ignored.
 
 This is a pure content model, not yet a visible popup surface. It performs no
 D-Bus calls, rendering, notifications, sound playback, or suspend actions.
