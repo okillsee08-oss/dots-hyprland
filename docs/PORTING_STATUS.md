@@ -452,3 +452,41 @@ Hard constraints:
   surface for the popup. It should reuse the existing snapshot and text engine,
   allocate buffers only while visible, close on pointer leave/outside click,
   and preserve keyboard/pointer accessibility without a timer or new worker.
+
+
+## Battery popup signed-rate correction (2026-11-23)
+
+- Re-checked the current upstream `services/Battery.qml` and
+  `modules/ii/bar/BatteryPopup.qml` at
+  [upstream revision 21733c3](https://github.com/end-4/dots-hyprland/commit/21733c3ca7f4edc20faafedea844dc96002c6f7f).
+  `Battery.energyRate` is `UPower.displayDevice.changeRate`. The official
+  Quickshell UPowerDevice reference specifies that `changeRate` is positive
+  while charging and negative while discharging
+  ([UPowerDevice documentation](https://quickshell.org/docs/v0.3.2/types/Quickshell.Services.UPower/UPowerDevice/)).
+- The popup model previously converted the signed discharging rate to a
+  positive magnitude for its power row. It now preserves the signed value,
+  matching upstream's `Battery.energyRate.toFixed(2)` presentation
+  (for example, `-12.00W` while discharging and `4.25W` while charging).
+  Added/updated assertions for both the signed discharging value and the
+  low-rate boundary.
+- The time-row threshold intentionally continues to use absolute rate
+  magnitude. The upstream QML checks `power <= 0.01`; because discharging
+  `changeRate` is negative, that condition also hides valid time-to-empty
+  estimates. The native model keeps the useful time-to-empty row visible
+  above the 0.01 W magnitude threshold. This is a deliberate correctness fix,
+  not a literal reproduction of that sign-sensitive QML condition.
+- Updated `rust/README.md` to document the signed watt display and the
+  time-row correction. No upstream QML, configuration, scripts, assets or
+  license files were modified.
+- The change is part of open [PR #8](https://github.com/okillsee08-oss/dots-hyprland/pull/8).
+  GitHub Actions remains disabled for this repository: the PR head has no
+  workflow runs or combined status checks. This execution environment has no
+  `cargo` or `rustc`, so `cargo fmt --check`, `cargo check`,
+  `cargo test`, and Clippy could not be executed. The new/updated tests are
+  therefore added but unverified; PR #8 must not be merged until Actions is
+  re-enabled and all four checks pass.
+- No component was merged into `main` in this run. No live UPower service,
+  NixOS/Hyprland compositor, accessibility, or memory/performance validation
+  is claimed. Next: restore CI, verify PR #8, then implement the lazy,
+  output-aware Wayland popup surface using the shared text engine and existing
+  panel/event-loop resources.
